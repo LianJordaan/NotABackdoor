@@ -1,6 +1,31 @@
 # NotABackdoor exact-JAR test record
 
-The results below belong to the earlier `1.0.0-dev` JAR only. The `1.0.0-beta.1` source includes a backup size-cap fix and release metadata change. It needs a fresh exact-JAR live sweep before any Minecraft version can be claimed for the beta.
+## 1.0.0-beta.1 candidate
+
+The frozen beta is `testing/notabackdoor/candidates/NotABackdoor-beta.1-957e24e59991.jar` in the parent workspace, built from production-code commit `d4ef773fb95a1e7b6032793993acc7efe6a6f2e9`. Its SHA-512 is:
+
+```text
+957e24e59991fc6b2bdf69cf4d31ebe3834e9c64d0df37ab952869101735b9637c1ccf89c5b0e104ca251e54ed331b4e09d81ae08bc6123adca786a1349ab72e
+```
+
+`mvn clean package` passed all 12 unit tests; `node --check` passed for the browser script. The exact installed beta JAR passed the isolated HTTP/API probe after a restart on each pinned Paper build below. Each test world was retained and its server was stopped afterward. The 26.3 Paper build is experimental.
+
+| Minecraft | Paper build | Java | Offline-mode result |
+| --- | ---: | ---: | --- |
+| 1.18.2 | 388 | 17 | 41/41 checks passed |
+| 1.21.11 | 132 | 21 | 41/41 checks passed |
+| 26.2 | 129 | 25 | 41/41 checks passed |
+| 26.3 (experimental) | 140 | 25 | 41/41 checks passed |
+
+Paper 26.2 build 129 also passed 41/41 checks with `online-mode=true`. The checks cover setup, password persistence, session and request-token enforcement, Host/Origin/traversal denial, file actions, ZIP/unzip, logs, player-list API, command dispatch, backup create/download/delete, and logout. These are automated panel checks; no Minecraft player joined. The online-mode result proves the panel runs while server authentication is enabled, but does not prove real account login.
+
+Machine-readable receipts and server logs are under `testing/notabackdoor/live-beta1/paper-<version>-b<build>-<mode>/` in the parent workspace. On Paper 1.18.2, headless Edge also passed desktop/mobile navigation, text-editor interaction, and eight unedited screenshots with no page errors. Four separate browser checks for unsaved edits, delayed navigation, and expired-session download recovery passed. Their receipts and captures are in `testing/notabackdoor/live-beta1/screenshots/`; selected captures are embedded in this repository's README and testing page.
+
+The beta has not been tested on other Minecraft versions, Purpur, Spigot, Bukkit, or a live player login. The panel binds to localhost; the documented remote route requires SSH access. A host offering only plugin upload and console access cannot use this remote route.
+
+## Historical 1.0.0-dev candidate
+
+The following earlier receipts apply only to the development JAR named below. Its hash differs from the beta and its passes must not be counted as beta passes.
 
 The frozen candidate is `NotABackdoor-90d246db0a3d.jar`, SHA-512:
 

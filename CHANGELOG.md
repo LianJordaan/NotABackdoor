@@ -9,4 +9,4 @@
 - Added backup migration for legacy settings and removed the old file handlers and pages.
 - Kept unsaved edits through delayed navigation and expired-session downloads; bounded ZIP creation and corrected the file root for custom world-container layouts.
 - Enforced the backup size cap against bytes actually copied, including files that grow during a live backup.
-- The previous development JAR was tested on pinned Paper 1.18.2, 1.21.11, 26.2, and experimental 26.3 builds. The beta JAR requires its own exact-hash live checks; see `docs/TESTING.md`.
+- Verified the exact beta JAR on pinned Paper 1.18.2, 1.21.11, 26.2, and experimental 26.3 builds, plus an online-mode 26.2 server; see `docs/TESTING.md` for the limits of those checks.

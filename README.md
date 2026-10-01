@@ -18,7 +18,7 @@ The upcoming `1.0.0-beta.1` release is a complete replacement of the old HTTP pa
 
 ## Install and sign in
 
-1. Use a Paper and Java combination listed in [the exact live test record](docs/TESTING.md). The older development JAR passed on Paper 1.18.2, 1.21.11, 26.2, and experimental 26.3; the new beta JAR needs its own live test sweep. Copy the JAR into `plugins/` and start the server.
+1. Use a Paper and Java combination listed in [the exact live test record](docs/TESTING.md). The beta JAR passed on Paper 1.18.2, 1.21.11, 26.2, and experimental 26.3; other versions are not yet live-tested. Copy the JAR into `plugins/` and start the server.
 2. Run `nab setup` **from the server console**. This prints a one-time code that expires in 15 minutes. It is never placed in a URL.
 3. On the server itself, open `http://127.0.0.1:8127`. From another computer, run `ssh -L 8127:127.0.0.1:8127 user@your-server` and open `http://localhost:8127` locally.
 4. Enter the setup code and choose a password of at least 12 characters. Sign in to the panel.
