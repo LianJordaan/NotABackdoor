@@ -1,41 +1,48 @@
 # NotABackdoor
 
-This is a Java plugin for Minecraft Java servers that allows running a web server on the Minecraft server, providing a server panel accessible through a website. The server panel offers various features for server administrators, including password protection for added security.
+A small web panel that runs inside a Paper server. It is for server owners who need to edit a configuration, look at a log, or moderate a player without navigating a full hosting control panel.
 
-## Disclaimer
+The current `1.0.0-dev` branch is a complete replacement of the old HTTP panel. It is **not released yet**. Keep using a separate server or a backup when testing it. The current access method requires SSH forwarding or a host-provided localhost reverse proxy; hosts that offer only plugin upload and a console cannot expose this panel yet.
 
-**DISCLAIMER: This software is provided "as is", without warranty of any kind, express or implied, including but not limited to the warranties of merchantability, fitness for a particular purpose, and noninfringement. The author(s) of this software shall not be liable for any claim, damages, or other liability, whether in an action of contract, tort, or otherwise, arising from, out of, or in connection with the software or the use or other dealings in the software.**
+![Desktop overview of the NotABackdoor panel](docs/screenshots/overview-desktop.png)
 
-Use this software at your own risk. The user of this software assumes all risks associated with its use, including the risk of data loss or exposure. The author(s) of this software shall not be responsible for any data loss, data exposure, or damage that may occur as a result of using this software, and the user agrees to use the software at their own discretion and risk.
+[See the file editor and mobile overview](docs/TESTING.md#browser-checks-and-screenshots).
 
-The author(s) of this software do not guarantee the accuracy, reliability, or completeness of the software, and do not warrant that the software will be error-free or uninterrupted. The user acknowledges that they have reviewed and accepted the risks associated with using this software, and the author(s) of this software shall not be held liable for any consequences resulting from the use or misuse of this software, including any data leakage or exposure that may occur.
+## What you can do
 
-## Features
+- Browse server files; create folders and files; upload, download, edit, rename, move, or delete them.
+- Zip a file or folder and extract an archive into a new folder. Extraction rejects paths that escape the chosen destination and limits archive expansion.
+- Read recent console output and run a server command.
+- See online players and manage operator, ban, and whitelist state by exact player name.
+- Save a server backup, download it, or delete it. The plugin saves worlds before archiving and omits Minecraft's live `session.lock` files, but a live server can still change files during the copy. Stop the server for a consistent snapshot.
 
-### Completed Features
+## Install and sign in
 
-- List files on the server
-- Download and edit files
-- Configure plugin settings
+1. Use a Paper and Java combination listed in [the exact live test record](docs/TESTING.md). The development JAR passed on Paper 1.18.2, 1.21.11, 26.2, and experimental 26.3; other versions are not yet live-tested. Copy the JAR into `plugins/` and start the server.
+2. Run `nab setup` **from the server console**. This prints a one-time code that expires in 15 minutes. It is never placed in a URL.
+3. On the server itself, open `http://127.0.0.1:8127`. From another computer, run `ssh -L 8127:127.0.0.1:8127 user@your-server` and open `http://localhost:8127` locally.
+4. Enter the setup code and choose a password of at least 12 characters. Sign in to the panel.
 
-### Features in Progress
+The panel listens only on `127.0.0.1`. It intentionally refuses a public bind address. No separate web service, database, or proxy is needed; remote access uses the server's existing SSH connection. Change `panel.port` in `plugins/NotABackdoor/config.yml` if 8127 is in use.
 
-- Create, delete, and move files
-- Zip and unzip files
-- Add a console log for monitoring
-- Execute commands in the server console
-- Manage player list: op/deop, ban/unban, whitelist/unwhitelist players
-- Perform server backups
-- Redesigned website for improved user experience
+If your host does not provide SSH access or a reverse proxy to localhost, you cannot use this web panel on that host yet. Opening an unauthenticated public HTTP port is not a supported setup shortcut.
 
-## Usage
+If you forget your password, run `nab setup` again in the server console and set a new one. This revokes existing sessions. The password is stored as a salted PBKDF2-HMAC-SHA256 hash in `plugins/NotABackdoor/auth.properties`. Keep that file and your SSH account private.
 
-Usage instructions will be provided in the future as the project is still in development.
+### Upgrade from the old panel
 
-## Contributing
+The first start copies an old `config.yml` to a timestamped `.legacy-*.bak` file and writes a safe v2 configuration. Review that backup privately, then remove it when you no longer need it. Old public HTTP, password-in-URL, and `clearFiles` settings are ignored. The plugin does not delete server files on startup.
 
-Contributions are welcome! Please see [CONTRIBUTING.md](https://github.com/LianJordaan/NotABackdoor/blob/master/CONTRIBUTING.md) for more information on how to contribute to this project.
+## Design and safeguards
 
-## License
+The browser UI uses the same-origin API. Every state-changing request requires a session-specific request token, and requests from a foreign browser origin are denied. Sessions expire after two hours and are invalidated when the password changes. Login attempts are throttled. Panel responses use no-store, a restrictive content security policy, and frame protection.
 
-This software is released under the [LICENSE](https://github.com/LianJordaan/NotABackdoor/blob/master/LICENSE) license. By using this software, you agree to abide by the terms of the license.
+File paths stay under the server process directory, including `plugins/` and `server.properties` even if worlds live elsewhere. Absolute paths, traversal, and symlink targets are rejected. The text editor checks the file hash before saving so a stale tab cannot silently replace newer work. Text edits are limited to 2 MiB, uploads to 128 MiB, ZIP source data and extracted archives to 1 GiB each. A backup excludes its own backup directory and is capped at 20 GiB.
+
+**The panel has full server authority after sign-in.** Treat its password, console access, and SSH tunnel as administrator credentials. A localhost-only design limits accidental internet exposure; it does not make an untrusted person safe to grant panel access.
+
+## Development
+
+Build with `mvn package`; run checks with `mvn test`. The shaded production JAR is `target/NotABackdoor-1.0.0-SNAPSHOT.jar`. Java sources target 17; the API baseline is Paper 1.18.2. Browser assets live in `src/main/resources/panel/`, separate from the HTTP, file, authentication, and backup services.
+
+The old implementation and pages were removed because several file endpoints could escape the intended directory and one handler ignored an authentication return value. The replacement has no route to those handlers.

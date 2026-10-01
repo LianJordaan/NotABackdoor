@@ -1,3 +1,8 @@
 name: NotABackdoor
-version: '${project.version}'
-main: com.lian.notabackdoor.NotABackdoor
+version: 1.0.0-dev
+main: com.lian.notabackdoor.panel.NotABackdoorPlugin
+api-version: '1.18'
+commands:
+  nab:
+    description: Create a one-time web panel setup code from the server console.
+    usage: /nab setup

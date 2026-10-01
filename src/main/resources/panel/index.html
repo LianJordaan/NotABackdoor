@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>NotABackdoor · Server panel</title>
+  <link rel="stylesheet" href="/style.css">
+  <script src="/app.js" defer></script>
+</head>
+<body>
+  <div id="auth-view" class="auth-shell" hidden>
+    <div class="auth-art" aria-hidden="true"><span class="orb orb-one"></span><span class="orb orb-two"></span><span class="art-grid"></span><span class="art-mark">N<span>·</span>B</span></div>
+    <div class="auth-content">
+      <div class="eyebrow"><span class="status-dot"></span> YOUR SERVER, IN REACH</div>
+      <h1>Welcome to <em>NotABackdoor.</em></h1>
+      <p class="auth-intro">A calm place to handle the things that usually mean opening five different tools.</p>
+      <form id="setup-form" class="auth-form" hidden>
+        <h2>Secure your panel</h2>
+        <p>Run <code>nab setup</code> in your server console. Enter the one-time code below, then choose a password with at least 12 characters.</p>
+        <label>One-time setup code<input name="code" autocomplete="off" spellcheck="false" required></label>
+        <label>New password<input name="password" type="password" autocomplete="new-password" minlength="12" required></label>
+        <button class="button primary" type="submit">Create password <span aria-hidden="true">↗</span></button>
+      </form>
+      <form id="login-form" class="auth-form" hidden>
+        <h2>Sign in</h2>
+        <p>Use the password you set from the server console.</p>
+        <label>Panel password<input name="password" type="password" autocomplete="current-password" required></label>
+        <button class="button primary" type="submit">Open panel <span aria-hidden="true">↗</span></button>
+      </form>
+      <p class="auth-footnote">This page is available only through localhost or your SSH tunnel.</p>
+    </div>
+  </div>
+
+  <div id="app-view" class="app-shell" hidden>
+    <aside class="sidebar">
+      <div class="brand"><span class="brand-mark">N<span>·</span>B</span><span><strong>NotABackdoor</strong><small>SERVER PANEL</small></span></div>
+      <div class="server-pill"><span class="status-dot"></span><span><strong>Connected</strong><small>Local secure session</small></span></div>
+      <div class="nav-label">WORKSPACE</div>
+      <nav aria-label="Main navigation">
+        <button class="nav-item active" data-view="overview" type="button"><span class="nav-icon">◫</span> Overview</button>
+        <button class="nav-item" data-view="files" type="button"><span class="nav-icon">▤</span> Files</button>
+        <button class="nav-item" data-view="console" type="button"><span class="nav-icon">⌘</span> Console</button>
+        <button class="nav-item" data-view="players" type="button"><span class="nav-icon">♙</span> Players</button>
+        <button class="nav-item" data-view="backups" type="button"><span class="nav-icon">▥</span> Backups</button>
+      </nav>
+      <div class="sidebar-bottom"><span class="side-note">A lighter way to run your server.</span><button id="logout" class="nav-item" type="button"><span class="nav-icon">↩</span> Sign out</button></div>
+    </aside>
+
+    <main class="main-content">
+      <header class="topbar"><div><span class="top-kicker">SERVER WORKSPACE</span><span class="top-divider">/</span><span id="current-section">Overview</span></div><div class="top-actions"><span class="top-live"><span class="status-dot"></span> Panel online</span><button id="refresh-view" class="icon-button" type="button" aria-label="Refresh current view" title="Refresh current view">↻</button></div></header>
+
+      <section class="view" id="view-overview">
+        <div class="page-heading"><div><p class="eyebrow">CONTROL ROOM</p><h1>Good to have you here.</h1><p>Everything you need to look after your Minecraft server, in one place.</p></div></div>
+        <div class="overview-grid">
+          <button class="feature-card card-files" data-go="files" type="button"><span class="feature-icon">▤</span><span class="feature-overline">YOUR SERVER</span><strong>Files</strong><span>Browse, edit and organize your server files without leaving this page.</span><span class="feature-link">Open file manager ↗</span></button>
+          <button class="feature-card card-console" data-go="console" type="button"><span class="feature-icon">⌘</span><span class="feature-overline">LIVE ACTIVITY</span><strong>Console</strong><span>See recent output and run a command when you need to.</span><span class="feature-link">Open console ↗</span></button>
+          <button class="feature-card card-players" data-go="players" type="button"><span class="feature-icon">♙</span><span class="feature-overline">COMMUNITY</span><strong>Players</strong><span>See who's online and handle moderation from one clear view.</span><span class="feature-link">Manage players ↗</span></button>
+          <button class="feature-card card-backups" data-go="backups" type="button"><span class="feature-icon">▥</span><span class="feature-overline">PEACE OF MIND</span><strong>Backups</strong><span>Save a copy of your server and download it whenever you want.</span><span class="feature-link">View backups ↗</span></button>
+        </div>
+        <div class="notice"><span class="notice-icon">ⓘ</span><div><strong>Working on your server from another computer?</strong><p>Keep the panel private with an SSH tunnel: <code>ssh -L 8127:127.0.0.1:8127 user@your-server</code>. Then open <code>http://localhost:8127</code>.</p></div></div>
+      </section>
+
+      <section class="view" id="view-files" hidden>
+        <div class="page-heading split"><div><p class="eyebrow">SERVER CONTENT</p><h1>Files</h1><p>Find what you need, make a change, and keep moving.</p></div><div class="button-row"><button id="new-file" class="button secondary" type="button">+ New file</button><button id="new-folder" class="button secondary" type="button">+ New folder</button><button id="upload-file" class="button primary" type="button">Upload file</button><input id="upload-input" type="file" hidden></div></div>
+        <div class="panel file-panel"><div class="panel-header"><div id="file-breadcrumbs" class="breadcrumbs" aria-label="Current folder"></div><div class="button-row compact"><button id="zip-file" class="button subtle" type="button">Zip</button><button id="unzip-file" class="button subtle" type="button">Unzip</button><button id="refresh-files" class="button subtle" type="button">Refresh</button></div></div><div class="file-layout"><div class="file-list-wrap"><table class="data-table"><thead><tr><th>Name</th><th>Size</th><th>Changed</th><th class="actions-col">Actions</th></tr></thead><tbody id="file-list"></tbody></table><div id="files-empty" class="empty-state" hidden>This folder is empty. Add a file or create a folder to get started.</div></div><div id="editor" class="editor" hidden><div class="editor-top"><div><span class="overline">TEXT EDITOR</span><strong id="editor-name"></strong></div><button id="close-editor" class="icon-button" aria-label="Close editor" type="button">×</button></div><textarea id="editor-text" spellcheck="false" aria-label="File contents"></textarea><div class="editor-footer"><span id="editor-state">No changes</span><button id="save-editor" class="button primary" type="button">Save changes</button></div></div></div></div>
+      </section>
+
+      <section class="view" id="view-console" hidden>
+        <div class="page-heading split"><div><p class="eyebrow">LIVE ACTIVITY</p><h1>Console</h1><p>Recent server messages and a direct line to the command console.</p></div><button id="refresh-logs" class="button secondary" type="button">Refresh log</button></div>
+        <div class="panel console-panel"><div class="panel-header"><div><strong>Server output</strong><span class="muted"> Latest 500 messages</span></div><span class="live-badge"><span class="status-dot"></span> Recent</span></div><div id="console-lines" class="console-lines" role="log" aria-live="off"></div><form id="command-form" class="command-form"><label for="command-input" class="command-prompt">›</label><input id="command-input" name="command" autocomplete="off" spellcheck="false" placeholder="Type a server command without /" required><button class="button primary" type="submit">Run command</button></form></div>
+      </section>
+
+      <section class="view" id="view-players" hidden>
+        <div class="page-heading"><p class="eyebrow">COMMUNITY</p><h1>Players</h1><p>See who's on the server and take a moderation action when needed.</p></div>
+        <div class="panel"><div class="panel-header"><strong>Online now</strong><button id="refresh-players" class="button subtle" type="button">Refresh</button></div><div id="player-list" class="player-list"></div></div>
+        <div class="panel action-panel"><div><span class="overline">PLAYER ACTION</span><h2>Manage a player</h2><p>Use an exact Minecraft username. The server handles the action as a console command.</p></div><form id="player-form" class="inline-form"><label>Username<input name="name" maxlength="16" pattern="[A-Za-z0-9_]{3,16}" required placeholder="Minecraft name"></label><label>Action<select name="action"><option value="whitelist-add">Add to whitelist</option><option value="whitelist-remove">Remove from whitelist</option><option value="ban">Ban</option><option value="pardon">Unban</option><option value="op">Grant operator</option><option value="deop">Remove operator</option></select></label><button class="button secondary" type="submit">Review action</button></form></div>
+      </section>
+
+      <section class="view" id="view-backups" hidden>
+        <div class="page-heading split"><div><p class="eyebrow">PEACE OF MIND</p><h1>Backups</h1><p>Save a copy before a big change and download it for safekeeping.</p></div><button id="create-backup" class="button primary" type="button">+ Create backup</button></div>
+        <div class="notice"><span class="notice-icon">ⓘ</span><div><strong>For a consistent world backup, stop the server first.</strong><p>Creating a backup while players are active saves worlds first, but files can change as the archive is written.</p></div></div>
+        <div class="panel"><div class="panel-header"><strong>Saved backups</strong><button id="refresh-backups" class="button subtle" type="button">Refresh</button></div><div id="backup-list" class="backup-list"></div></div>
+      </section>
+    </main>
+  </div>
+
+  <dialog id="action-dialog" class="modal"><form method="dialog" id="dialog-form"><div class="modal-eyebrow" id="dialog-eyebrow">REVIEW ACTION</div><h2 id="dialog-title"></h2><p id="dialog-description"></p><div id="dialog-fields" class="dialog-fields"></div><div class="modal-actions"><button class="button secondary" value="cancel" type="submit">Cancel</button><button id="dialog-confirm" class="button primary" value="confirm" type="submit">Confirm</button></div></form></dialog>
+  <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+</body>
+</html>
