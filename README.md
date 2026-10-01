@@ -2,7 +2,7 @@
 
 A small web panel that runs inside a Paper server. It is for server owners who need to edit a configuration, look at a log, or moderate a player without navigating a full hosting control panel.
 
-The current `1.0.0-dev` branch is a complete replacement of the old HTTP panel. It is **not released yet**. Keep using a separate server or a backup when testing it. The current access method requires SSH forwarding or a host-provided localhost reverse proxy; hosts that offer only plugin upload and a console cannot expose this panel yet.
+The current `1.0.0-dev` branch is a complete replacement of the old HTTP panel. It is **not released yet**. Keep using a separate server or a backup when testing it. The supported remote-access setup uses SSH port forwarding. Hosts that offer only plugin upload and a console cannot expose this panel yet.
 
 ![Desktop overview of the NotABackdoor panel](docs/screenshots/overview-desktop.png)
 
@@ -25,7 +25,7 @@ The current `1.0.0-dev` branch is a complete replacement of the old HTTP panel. 
 
 The panel listens only on `127.0.0.1`. It intentionally refuses a public bind address. No separate web service, database, or proxy is needed; remote access uses the server's existing SSH connection. Change `panel.port` in `plugins/NotABackdoor/config.yml` if 8127 is in use.
 
-If your host does not provide SSH access or a reverse proxy to localhost, you cannot use this web panel on that host yet. Opening an unauthenticated public HTTP port is not a supported setup shortcut.
+If your host does not provide SSH access, you cannot use the documented remote-access setup on that host yet. A custom HTTPS reverse proxy needs its own access controls and must rewrite the upstream `Host` and `Origin` headers to the allowed localhost address; it is not an automatic setup option. Opening a public HTTP port is not a supported shortcut.
 
 If you forget your password, run `nab setup` again in the server console and set a new one. This revokes existing sessions. The password is stored as a salted PBKDF2-HMAC-SHA256 hash in `plugins/NotABackdoor/auth.properties`. Keep that file and your SSH account private.
 
