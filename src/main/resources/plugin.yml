@@ -1,5 +1,5 @@
 name: NotABackdoor
-version: 1.0.0-dev
+version: 1.0.0-beta.1
 main: com.lian.notabackdoor.panel.NotABackdoorPlugin
 api-version: '1.18'
 commands:

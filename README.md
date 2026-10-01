@@ -2,7 +2,7 @@
 
 A small web panel that runs inside a Paper server. It is for server owners who need to edit a configuration, look at a log, or moderate a player without navigating a full hosting control panel.
 
-The current `1.0.0-dev` branch is a complete replacement of the old HTTP panel. It is **not released yet**. Keep using a separate server or a backup when testing it. The supported remote-access setup uses SSH port forwarding. Hosts that offer only plugin upload and a console cannot expose this panel yet.
+The upcoming `1.0.0-beta.1` release is a complete replacement of the old HTTP panel. It is **not released yet**. Keep using a separate server or a backup when testing it. The supported remote-access setup uses SSH port forwarding. Hosts that offer only plugin upload and a console cannot expose this panel yet.
 
 ![Desktop overview of the NotABackdoor panel](docs/screenshots/overview-desktop.png)
 
@@ -18,7 +18,7 @@ The current `1.0.0-dev` branch is a complete replacement of the old HTTP panel. 
 
 ## Install and sign in
 
-1. Use a Paper and Java combination listed in [the exact live test record](docs/TESTING.md). The development JAR passed on Paper 1.18.2, 1.21.11, 26.2, and experimental 26.3; other versions are not yet live-tested. Copy the JAR into `plugins/` and start the server.
+1. Use a Paper and Java combination listed in [the exact live test record](docs/TESTING.md). The older development JAR passed on Paper 1.18.2, 1.21.11, 26.2, and experimental 26.3; the new beta JAR needs its own live test sweep. Copy the JAR into `plugins/` and start the server.
 2. Run `nab setup` **from the server console**. This prints a one-time code that expires in 15 minutes. It is never placed in a URL.
 3. On the server itself, open `http://127.0.0.1:8127`. From another computer, run `ssh -L 8127:127.0.0.1:8127 user@your-server` and open `http://localhost:8127` locally.
 4. Enter the setup code and choose a password of at least 12 characters. Sign in to the panel.
@@ -43,6 +43,6 @@ File paths stay under the server process directory, including `plugins/` and `se
 
 ## Development
 
-Build with `mvn package`; run checks with `mvn test`. The shaded production JAR is `target/NotABackdoor-1.0.0-SNAPSHOT.jar`. Java sources target 17; the API baseline is Paper 1.18.2. Browser assets live in `src/main/resources/panel/`, separate from the HTTP, file, authentication, and backup services.
+Build with `mvn package`; run checks with `mvn test`. The shaded production JAR is `target/NotABackdoor-1.0.0-beta.1.jar`. Java sources target 17; the API baseline is Paper 1.18.2. Browser assets live in `src/main/resources/panel/`, separate from the HTTP, file, authentication, and backup services.
 
 The old implementation and pages were removed because several file endpoints could escape the intended directory and one handler ignored an authentication return value. The replacement has no route to those handlers.

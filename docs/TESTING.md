@@ -1,4 +1,6 @@
-# NotABackdoor 1.0.0-dev test record
+# NotABackdoor exact-JAR test record
+
+The results below belong to the earlier `1.0.0-dev` JAR only. The `1.0.0-beta.1` source includes a backup size-cap fix and release metadata change. It needs a fresh exact-JAR live sweep before any Minecraft version can be claimed for the beta.
 
 The frozen candidate is `NotABackdoor-90d246db0a3d.jar`, SHA-512:
 

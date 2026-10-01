@@ -1,6 +1,7 @@
 package com.lian.notabackdoor.panel.files;
 
 import java.io.IOException;
+import java.io.InputStream;
 import java.nio.file.FileVisitResult;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
@@ -87,10 +88,23 @@ public final class PanelBackups {
                                 return FileVisitResult.CONTINUE;
                             }
                             if (++count[0] > MAX_ENTRIES) throw new IOException("Too many files for one backup");
-                            total[0] += attributes.size();
-                            if (total[0] > MAX_BYTES) throw new IOException("Backup exceeded the 20 GiB limit");
+                            if (attributes.size() > MAX_BYTES - total[0]) {
+                                throw new IOException("Backup exceeded the 20 GiB limit");
+                            }
                             zip.putNextEntry(new ZipEntry(name(file)));
-                            Files.copy(file, zip);
+                            // A live server can append to a file after its size was checked.
+                            // Count actual copied bytes, and do not follow a replacement symlink.
+                            try (InputStream input = Files.newInputStream(file, LinkOption.NOFOLLOW_LINKS)) {
+                                byte[] buffer = new byte[64 * 1024];
+                                int read;
+                                while ((read = input.read(buffer)) != -1) {
+                                    if (read > MAX_BYTES - total[0]) {
+                                        throw new IOException("Backup exceeded the 20 GiB limit");
+                                    }
+                                    zip.write(buffer, 0, read);
+                                    total[0] += read;
+                                }
+                            }
                             zip.closeEntry();
                             return FileVisitResult.CONTINUE;
                         }
