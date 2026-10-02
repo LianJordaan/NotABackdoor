@@ -21,10 +21,13 @@ const state = {
   metricRequest: 0,
   consoleCursor: null,
   consoleLoading: false,
+  consoleResetQueued: false,
   consoleTruncated: false,
   backupJobId: null,
   backupPolling: false,
   backupJobTerminal: false,
+  backupLatestRequest: 0,
+  lastBackupReconcile: 0,
 };
 
 // The setup-check token stays in the URL fragment, never in an HTTP request URL.
@@ -95,7 +98,9 @@ async function request(path, options = {}) {
       state.csrf = null;
       showAuth(true);
     }
-    throw new Error(result.error || `Request failed (${response.status})`);
+    const error = new Error(result.error || `Request failed (${response.status})`);
+    error.status = response.status;
+    throw error;
   }
   return result;
 }
@@ -731,7 +736,10 @@ async function download(url, filename) {
 }
 
 async function loadLogs(reset = false) {
-  if (state.consoleLoading) return;
+  if (state.consoleLoading) {
+    if (reset) state.consoleResetQueued = true;
+    return;
+  }
   state.consoleLoading = true;
   try {
     if (reset) state.consoleCursor = null;
@@ -772,7 +780,15 @@ async function loadLogs(reset = false) {
     $("console-status").textContent = data.available
       ? ` Live · ${shortTime(Date.now())}${state.consoleTruncated ? " · Older lines omitted" : ""}`
       : " Waiting for latest.log";
-  } finally { state.consoleLoading = false; }
+  } finally {
+    state.consoleLoading = false;
+    if (state.consoleResetQueued && state.csrf) {
+      state.consoleResetQueued = false;
+      loadLogs(true).catch(fail);
+    } else if (!state.csrf) {
+      state.consoleResetQueued = false;
+    }
+  }
 }
 
 async function runCommand(form) {
@@ -841,9 +857,22 @@ async function loadBackups() {
     return row;
   });
   $("backup-list").replaceChildren(...(rows.length ? rows : [node("div", "empty-state", "No backups yet. Create one before your next big change.")]));
-  if (!state.backupJobId) {
-    const current = await request("/api/backups/latest");
-    if (current.job) { state.backupJobId = current.job.id; renderBackupJob(current.job); }
+  await reconcileLatestBackupJob();
+}
+
+async function reconcileLatestBackupJob() {
+  const serial = ++state.backupLatestRequest;
+  state.lastBackupReconcile = Date.now();
+  const current = await request("/api/backups/latest");
+  if (serial !== state.backupLatestRequest) return;
+  if (current.job) {
+    state.backupJobId = current.job.id;
+    renderBackupJob(current.job);
+  } else {
+    state.backupJobId = null;
+    state.backupJobTerminal = false;
+    $("backup-progress").hidden = true;
+    $("create-backup").disabled = false;
   }
 }
 
@@ -882,8 +911,20 @@ function renderBackupJob(job) {
 async function pollBackupJob() {
   if (!state.backupJobId || state.backupJobTerminal || state.backupPolling || !state.csrf) return;
   state.backupPolling = true;
+  const requestedId = state.backupJobId;
   try {
-    const job = await request(`/api/backups/job?id=${encodeURIComponent(state.backupJobId)}`);
+    let job;
+    try {
+      job = await request(`/api/backups/job?id=${encodeURIComponent(requestedId)}`);
+    } catch (error) {
+      if (error.status !== 400) throw error;
+      if (state.backupJobId === requestedId) {
+        state.backupJobId = null;
+        await loadBackups();
+      }
+      return;
+    }
+    if (state.backupJobId !== requestedId) return;
     const previous = $("backup-phase").textContent;
     renderBackupJob(job);
     if (job.phase === "completed" && previous !== "Backup ready") {
@@ -901,6 +942,8 @@ async function createBackup() {
   setBusy(button, true, "Starting…");
   try {
     const job = await request("/api/backups", {method: "POST"});
+    ++state.backupLatestRequest;
+    state.lastBackupReconcile = Date.now();
     state.backupJobId = job.id;
     state.backupJobTerminal = false;
     renderBackupJob(job);
@@ -1046,5 +1089,7 @@ setInterval(() => {
   if (state.view === "console") loadLogs().catch(fail);
   if (state.view === "overview" && Date.now() - (state.lastMetricPoll || 0) >= (state.metricRange === "realtime" ? 1000 : 15_000)) loadMetrics().catch(fail);
   if (state.backupJobId && !state.backupJobTerminal) pollBackupJob().catch(fail);
+  if (state.view === "backups" && (!state.backupJobId || state.backupJobTerminal)
+      && Date.now() - state.lastBackupReconcile >= 10_000) reconcileLatestBackupJob().catch(fail);
 }, 1500);
 boot();
