@@ -843,7 +843,7 @@ function renderBackupJob(job) {
     const percent = Math.min(99, Math.max(0, Math.round(done / total * 100)));
     bar.value = percent;
     $("backup-percent").textContent = `${percent}%`;
-    $("backup-progress-detail").textContent = `${formatSize(done)} of ${formatSize(total)} · ${job.filesDone || 0} of ${job.totalFiles || 0} files`;
+    $("backup-progress-detail").textContent = `${formatSize(done)} copied · ~${formatSize(total)} estimated at start · ${job.filesDone || 0} of ~${job.totalFiles || 0} files`;
   } else if (job.phase === "failed") {
     bar.removeAttribute("value");
     $("backup-percent").textContent = "Failed";
