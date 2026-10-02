@@ -1,8 +1,38 @@
 # NotABackdoor exact-JAR test record
 
+## Outbound relay 1.0.0-beta.2 candidate
+
+The frozen candidate is `testing/notabackdoor/candidates/NotABackdoor-beta.2-091ad803c867.jar` in the parent workspace, built from source commit `633af9d0af1268388b5680531e38c5ff2c4c3699`. Its SHA-512 is:
+
+```text
+091ad803c86783c63d6293db186c45b396e76a6f53a6051a6a3e6195c8ea293f578ce9369315a91d633693b3501ee414133aec4f8f48ef4b5340e099442262a0
+```
+
+The JAR targets Java 17. A clean Windows checkout compiled with JDK 21 reproduced all **324 JAR entry bytes** from the candidate. The whole archive hash differs because ZIP container metadata differs; the attestation is `testing/notabackdoor/candidates/attestation-relay-beta2-windows.json`. A separate clean checkout on a Linux filesystem, built with JDK 17, passed all **18 Maven tests with none skipped**, including symlink-race checks. Its line endings and compiler differ from the Windows candidate, so that build is test evidence, not the bytewise provenance proof. The local Python relay suite passed **14 tests**, including TLS rejection, pairing, durable limits, bounded streaming, concurrent jobs, cancellation, restart, and revocation. Browser JavaScript syntax passed.
+
+The **same exact JAR** passed two startup rounds on each pinned Paper combination: 40 panel checks at first start and 41 after restart, including password persistence. Every server stopped afterward and its world was retained. Paper 26.3 remains experimental.
+
+| Minecraft | Paper build | Java | Mode | Result |
+| --- | ---: | ---: | --- | --- |
+| 1.18.2 | 388 | 17 | Offline | 40 + 41 checks passed |
+| 1.21.11 | 132 | 21 | Offline | 40 + 41 checks passed |
+| 26.2 | 129 | 25 | Offline | 40 + 41 checks passed |
+| 26.3 (experimental) | 140 | 25 | Offline | 40 + 41 checks passed |
+| 26.2 | 129 | 25 | Online | 40 + 41 checks passed |
+
+Local HTTPS relay bridge checks also passed **11/11** on Paper 1.18.2 and 26.2, with the actual plugin forwarding the panel through a certificate-verified local relay. The checks included console pairing link and separate code, route and panel cookies, real page assets, panel login, foreign-Origin denial, untrusted-certificate rejection, and revocation. This does not prove a public DNS, Nginx, or certificate deployment. Those remain unconfigured.
+
+An isolated Paper 1.21.11 build 132 server, Java 21, with an offline-mode scripted Minecraft client separately passed **30/30** operator, console, whitelist, ban, pardon, reconnect, and denial checks against this JAR. The retained receipt is `testing/notabackdoor/live-relay-client/20261002T043912Z/result.json`; the server was stopped afterward. No Microsoft-authenticated player joined an online-mode server. The 26.2 online-mode check proves startup and panel API behavior only.
+
+Headless Edge captured eight unedited desktop/mobile screenshots while the exact JAR ran on Paper 1.18.2. It opened and inspected a file, navigated all views, and reported no page errors. The browser receipt records this JAR and the embedded panel-asset SHA-256 values. Selected captures below are copied byte-for-byte from `testing/notabackdoor/live-relay-beta2/screenshots/` in the parent workspace.
+
+The relay binds to loopback by default and has review-only dedicated-hostname service and Nginx templates. No public relay exists yet. The current `za.bytebuilders.co.za` host serves a different application; it cannot be reused even on a separate port because cookies are shared by hostname. A dedicated origin, DNS, matching TLS certificates, owner approval, and live public pairing/login/revocation checks are release prerequisites. SSH forwarding remains available now. The relay operator can see panel passwords, files, commands, and backups in transit; SSH is the higher-privacy choice. One browser profile supports one active route/session on a relay origin, so switching servers needs re-pairing or separate browser profiles.
+
+Only the four Paper versions above were live tested. Purpur, Spigot, Bukkit, other Paper builds, default Windows JDK filesystem providers, and authenticated Microsoft logins remain unverified or unsupported as stated.
+
 ## Secure-file 1.0.0-beta.1 candidate
 
-The current frozen candidate in the parent workspace is `testing/notabackdoor/candidates/NotABackdoor-beta.1-7827286ffc8c.jar`, built from production-source commit `df5be879e076940ddbb35e682af31c2a4d1a65b1`. Its SHA-512 is:
+The earlier frozen candidate in the parent workspace is `testing/notabackdoor/candidates/NotABackdoor-beta.1-7827286ffc8c.jar`, built from production-source commit `df5be879e076940ddbb35e682af31c2a4d1a65b1`. Its SHA-512 is:
 
 ```text
 7827286ffc8c792a480e9b005d339cb4d9574b7c0968cf19b1c8814605bb7dd2391787b883a3caab5fdebbb008849fdd4a33fea4c16cb2ce25dc113da259ae7b
@@ -81,10 +111,10 @@ The pinned Paper JAR SHA-256 values were `0578f18f4d632b494b468ec56b3b414b5b56fe
 
 ## Browser checks and screenshots
 
-Headless Edge opened the real panel on Paper 1.18.2, signed in, navigated all views, opened and inspected a file, and rendered desktop and mobile layouts without page errors. A separate browser regression used delayed responses to check that new edits survive file and folder navigation. It also invalidated the session during a download, confirmed the browser stayed on the panel, and confirmed the unsaved text survived sign-in. All four regression checks passed. Receipts are in `testing/notabackdoor/live/screenshots/` in the parent workspace.
+Headless Edge opened the exact beta.2 panel on Paper 1.18.2, signed in, navigated all views, opened and inspected a file, and rendered desktop and mobile layouts without page errors. Its eight screenshots and receipt are in `testing/notabackdoor/live-relay-beta2/screenshots/` in the parent workspace. An earlier beta.1 browser regression used delayed responses to check that new edits survive file and folder navigation; it also invalidated the session during a download and checked that unsaved text survived sign-in. Those four historical regression checks passed, with separate receipts in `testing/notabackdoor/live/screenshots/`.
 
 ![File editor on desktop](screenshots/files-editor-desktop.png)
 
 ![Overview on a narrow mobile viewport](screenshots/overview-mobile.png)
 
-The screenshots are unedited captures of the frozen candidate. The browser checks did not join the Minecraft server as a player. All test servers were loopback-bound; the four-version sweep used `online-mode=false`, and the extra Paper 26.2 panel check used `online-mode=true`. The separate 1.21.11 offline-mode real-client probe above tested game connections. None of these checks establish Microsoft-authenticated player login or compatibility on untested Paper builds, Spigot, Purpur, or other loaders.
+The images above are unedited captures of the exact beta.2 candidate. The browser checks did not join the Minecraft server as a player. All local test servers were loopback-bound. None of these checks establish Microsoft-authenticated player login or compatibility on untested Paper builds, Spigot, Purpur, or other loaders.

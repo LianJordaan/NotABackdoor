@@ -2,7 +2,7 @@
 
 A small web panel that runs inside a Paper server. It is for server owners who need to edit a configuration, look at a log, or moderate a player without navigating a full hosting control panel.
 
-The `1.0.0-beta.2` candidate replaces the old HTTP panel and adds an [opt-in outbound HTTPS relay](relay/README.md). It is **not released yet**. Keep using a separate server or a backup when testing it. SSH forwarding remains the tested remote-access route; the relay is not publicly deployed yet.
+The `1.0.0-beta.2` candidate replaces the old HTTP panel and adds an [opt-in outbound HTTPS relay](relay/README.md). It is **not released yet**. Keep using a separate server or a backup when testing it. SSH forwarding and the relay bridge both passed local tests; the relay is not publicly deployed yet.
 
 ![Desktop overview of the NotABackdoor panel](docs/screenshots/overview-desktop.png)
 
@@ -18,16 +18,16 @@ The `1.0.0-beta.2` candidate replaces the old HTTP panel and adds an [opt-in out
 
 ## Install and sign in
 
-1. Use a Paper and Java combination listed in [the exact live test record](docs/TESTING.md). The previous secure beta JAR passed on Paper 1.18.2, 1.21.11, 26.2, and experimental 26.3; this new relay candidate requires its own exact-JAR checks. Copy the JAR into `plugins/` and start the server.
+1. Use a Paper and Java combination listed in [the exact live test record](docs/TESTING.md). This beta.2 JAR passed on Paper 1.18.2, 1.21.11, 26.2, and experimental 26.3. Copy the JAR into `plugins/` and start the server.
 2. Run `nab setup` **from the server console**. This prints a one-time code that expires in 15 minutes. It is never placed in a URL.
 3. On the server itself, open `http://127.0.0.1:8127`. From another computer, run `ssh -L 8127:127.0.0.1:8127 user@your-server` and open `http://localhost:8127` locally.
 4. Enter the setup code and choose a password of at least 12 characters. Sign in to the panel.
 
 The panel listens only on `127.0.0.1`. It intentionally refuses a public bind address. SSH access needs no additional service. The optional relay uses a separately operated HTTPS service and a dedicated hostname; it is disabled until paired. Change `panel.port` in `plugins/NotABackdoor/config.yml` if 8127 is in use.
 
-The file manager and backups require a Java filesystem provider with `SecureDirectoryStream`, which keeps operations bound to open directory handles during symlink swaps. If the provider lacks it, the plugin refuses to start and logs `This filesystem has no race-safe directory handles; panel file access is disabled`. The tested Linux filesystem supports it; the default Windows JDK provider does not. The exact secure-file candidate passed the [pinned live checks](docs/TESTING.md#secure-file-100-beta1-candidate).
+The file manager and backups require a Java filesystem provider with `SecureDirectoryStream`, which keeps operations bound to open directory handles during symlink swaps. If the provider lacks it, the plugin refuses to start and logs `This filesystem has no race-safe directory handles; panel file access is disabled`. The tested Linux filesystem supports it; the default Windows JDK provider does not. The exact beta.2 candidate passed the [pinned live checks](docs/TESTING.md#outbound-relay-100-beta2-candidate).
 
-On Paper 1.21.11, a scripted offline-mode Minecraft client also verified that panel operator, console, whitelist, and ban actions affect a connected player and subsequent joins. The [test record](docs/TESTING.md#real-client-panel-probe) distinguishes this 30/30 end-to-end result from the four-version panel API checks. A Microsoft-authenticated player login has not been tested.
+On Paper 1.21.11, a scripted offline-mode Minecraft client also verified that panel operator, console, whitelist, and ban actions affect a connected player and subsequent joins. The [beta.2 test record](docs/TESTING.md#outbound-relay-100-beta2-candidate) distinguishes this 30/30 end-to-end result from the four-version panel API checks. A Microsoft-authenticated player login has not been tested.
 
 If your host does not provide SSH access, the [outbound relay candidate](relay/README.md) offers a one-time console pairing link after a relay operator deploys a dedicated HTTPS origin. Set `relay.origin` in the plugin config, run `nab relay pair`, then open the link and enter the separate console code. It is not publicly deployed, so this is not yet an available setup option. Opening a public HTTP port is not a supported shortcut.
 
