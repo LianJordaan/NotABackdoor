@@ -1,7 +1,8 @@
 # Changelog
 
-## 1.0.0-beta.3 — candidate, not published
+## 1.0.0-beta.3 — public beta release
 
+- The supported setup uses the panel's localhost HTTP listener, with SSH forwarding for remote access. The packaged outbound relay connector remains experimental and is not provided as a public service for this release.
 - Corrected the Backups screen and confirmation: in-panel archives are created while Paper runs and cover only the server process folder; worlds stored elsewhere are excluded.
 - Clarified that a strictly consistent full-server backup requires stopping Paper and using the host's snapshot or backup tool. This release changes the guidance, not the archive implementation.
 

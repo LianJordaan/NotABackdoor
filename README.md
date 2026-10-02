@@ -2,7 +2,7 @@
 
 A small web panel that runs inside a Paper server. It is for server owners who need to edit a configuration, look at a log, or moderate a player without navigating a full hosting control panel.
 
-The `1.0.0-beta.3` candidate replaces the old HTTP panel and adds an [opt-in outbound HTTPS relay](relay/README.md). It is **not released yet**. Keep using a separate server or a host backup when testing it. SSH forwarding and the relay bridge passed local beta.3 checks; the relay is not publicly deployed yet.
+The publicly listed `1.0.0-beta.3` release replaces the old public HTTP panel with a localhost HTTP panel and an improved browser interface. Keep using a separate server or a host backup when testing this beta. Local panel and SSH-forwarded access passed live checks. An [experimental outbound relay connector](relay/README.md) is packaged but is not part of the supported setup for this release.
 
 ![Desktop overview of the NotABackdoor panel](docs/screenshots/overview-desktop.png)
 
@@ -23,13 +23,13 @@ The `1.0.0-beta.3` candidate replaces the old HTTP panel and adds an [opt-in out
 3. On the server itself, open `http://127.0.0.1:8127`. From another computer, run `ssh -L 8127:127.0.0.1:8127 user@your-server` and open `http://localhost:8127` locally.
 4. Enter the setup code and choose a password of at least 12 characters. Sign in to the panel.
 
-The panel listens only on `127.0.0.1`. It intentionally refuses a public bind address. SSH access needs no additional service. The optional relay uses a separately operated HTTPS service and a dedicated hostname; it is disabled until paired. Change `panel.port` in `plugins/NotABackdoor/config.yml` if 8127 is in use.
+The supported panel listens only on `127.0.0.1` over HTTP. It intentionally refuses a public bind address. SSH forwarding provides encrypted remote transport without changing the panel's HTTP listener. The optional relay connector is unconfigured and unsupported in this release. Change `panel.port` in `plugins/NotABackdoor/config.yml` if 8127 is in use.
 
 The file manager and backups require a Java filesystem provider with `SecureDirectoryStream`, which keeps operations bound to open directory handles during symlink swaps. If the provider lacks it, the plugin refuses to start and logs `This filesystem has no race-safe directory handles; panel file access is disabled`. The tested Linux filesystem supports it; the default Windows JDK provider does not. The exact beta.3 candidate passed the [pinned live checks](docs/TESTING.md#backup-copy-100-beta3-candidate).
 
 On Paper 1.21.11, a scripted offline-mode Minecraft client also verified that panel operator, console, whitelist, and ban actions affect a connected player and subsequent joins. The [beta.3 test record](docs/TESTING.md#backup-copy-100-beta3-candidate) distinguishes this 30/30 end-to-end result from the four-version panel API checks. A Microsoft-authenticated player login has not been tested.
 
-If your host does not provide SSH access, the [outbound relay candidate](relay/README.md) offers a one-time console pairing link after a relay operator deploys a dedicated HTTPS origin. Set `relay.origin` in the plugin config, run `nab relay pair`, then open the link and enter the separate console code. It is not publicly deployed, so this is not yet an available setup option. Opening a public HTTP port is not a supported shortcut.
+If your host does not provide SSH access, the [outbound relay candidate](relay/README.md) is still experimental and has no deployed service. It is not an available setup option for this beta. Opening a public HTTP port is not a supported shortcut.
 
 If you forget your password, run `nab setup` again in the server console and set a new one. This revokes existing sessions. The password is stored as a salted PBKDF2-HMAC-SHA256 hash in `plugins/NotABackdoor/auth.properties`. Keep that file and your SSH account private.
 
