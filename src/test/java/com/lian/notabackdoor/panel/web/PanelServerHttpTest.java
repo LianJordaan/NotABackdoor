@@ -31,6 +31,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.UUID;
 import java.util.logging.Logger;
+import java.util.zip.ZipFile;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -109,6 +110,45 @@ class PanelServerHttpTest {
             assertEquals(200, server.sendFrom("127.0.0.2", "POST", "/api/setup", server.host(),
                     server.origin(), correct).status());
             assertTrue(server.auth.isConfigured());
+        }
+    }
+
+    @Test
+    void authenticatedBulkFileActionsRequireExactConfirmation() throws Exception {
+        Files.writeString(directory.resolve("one.txt"), "one");
+        Files.createDirectories(directory.resolve("folder"));
+        Files.writeString(directory.resolve("folder/two.txt"), "two");
+        try (Harness server = new Harness(directory, new SetupProbeService())) {
+            assertEquals(401, server.send("POST", "/api/files/zip", server.host(), server.origin(),
+                    "{\"paths\":[\"one.txt\"],\"archive\":\"out.zip\"}").status());
+            server.auth.setPassword(server.auth.firstRunCode().value(), "long test password".toCharArray());
+            Reply login = server.send("POST", "/api/login", server.host(), server.origin(),
+                    "{\"password\":\"long test password\"}");
+            String cookie = login.header("set-cookie").split(";", 2)[0];
+            String csrf = JsonParser.parseString(login.body()).getAsJsonObject().get("csrf").getAsString();
+            List<String> headers = List.of("Host: " + server.host(), "Origin: " + server.origin(),
+                    "Cookie: " + cookie, "X-CSRF-Token: " + csrf);
+            assertEquals(201, server.sendWithHeaders("POST", "/api/files/zip", headers,
+                    "{\"paths\":[\"one.txt\",\"folder\"],\"archive\":\"out.zip\"}").status());
+            try (ZipFile archive = new ZipFile(directory.resolve("out.zip").toFile())) {
+                assertNotNull(archive.getEntry("one.txt"));
+                assertNotNull(archive.getEntry("folder/two.txt"));
+            }
+            Reply tar = server.sendWithHeaders("POST", "/api/files/tar", headers,
+                    "{\"paths\":[\"one.txt\",\"folder\"]}");
+            assertEquals(200, tar.status());
+            assertEquals("application/x-tar", tar.header("content-type"));
+            assertTrue(tar.body().contains("one.txt"));
+            assertTrue(tar.body().contains("folder/two.txt"));
+
+            assertEquals(400, server.sendWithHeaders("DELETE", "/api/files/bulk", headers,
+                    "{\"paths\":[\"one.txt\",\"folder\"],\"confirmPaths\":[\"one.txt\"]}").status());
+            assertTrue(Files.exists(directory.resolve("one.txt")));
+            assertEquals(200, server.sendWithHeaders("DELETE", "/api/files/bulk", headers,
+                    "{\"paths\":[\"one.txt\",\"folder\"],\"confirmPaths\":[\"one.txt\",\"folder\"]}").status());
+            assertFalse(Files.exists(directory.resolve("one.txt")));
+            assertFalse(Files.exists(directory.resolve("folder")));
+            assertTrue(Files.exists(directory.resolve("out.zip")));
         }
     }
 

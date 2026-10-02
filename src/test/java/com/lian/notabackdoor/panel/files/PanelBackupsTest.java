@@ -11,6 +11,8 @@ import java.nio.file.Path;
 import java.nio.file.SecureDirectoryStream;
 import java.util.HashSet;
 import java.util.Set;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
 
@@ -51,6 +53,38 @@ class PanelBackupsTest {
             assertEquals(2, backups.list().size());
             backups.delete(made.name());
             assertEquals(1, backups.list().size());
+        }
+    }
+
+    @Test
+    void backgroundBackupReportsProgressAndRejectsConcurrentJobs() throws Exception {
+        Files.createDirectories(root.resolve("world"));
+        Files.write(root.resolve("world/level.dat"), new byte[2 * 1024 * 1024]);
+        CountDownLatch saving = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        try (PanelBackups backups = new PanelBackups(root, root.resolve("plugins/NotABackdoor/backups"))) {
+            PanelBackups.BackupJob started = backups.start(() -> {
+                saving.countDown();
+                if (!release.await(5, TimeUnit.SECONDS)) throw new IllegalStateException("Timed out saving worlds");
+                return null;
+            });
+            assertTrue(saving.await(5, TimeUnit.SECONDS));
+            assertEquals("saving", backups.job(started.id()).phase());
+            assertThrows(IllegalStateException.class, () -> backups.start(() -> null));
+            release.countDown();
+            PanelBackups.BackupJob finished = started;
+            long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
+            while (!finished.phase().equals("completed") && !finished.phase().equals("failed")
+                    && System.nanoTime() < deadline) {
+                Thread.sleep(10);
+                finished = backups.job(started.id());
+            }
+            assertEquals("completed", finished.phase(), finished.error());
+            assertEquals(2L * 1024 * 1024, finished.totalBytes());
+            assertEquals(finished.totalBytes(), finished.bytesDone());
+            assertEquals(1, finished.totalFiles());
+            assertEquals(1, finished.filesDone());
+            assertTrue(finished.backup().size() > 0);
         }
     }
 }

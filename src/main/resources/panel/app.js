@@ -12,6 +12,18 @@ const state = {
   editorRequest: 0,
   editorRevision: 0,
   setupCheckNonce: null,
+  selectedFiles: new Set(),
+  fileEntries: [],
+  metricRange: "realtime",
+  metricName: "cpuPercent",
+  metricSamples: [],
+  metricWindow: null,
+  metricRequest: 0,
+  consoleCursor: null,
+  consoleLoading: false,
+  backupJobId: null,
+  backupPolling: false,
+  backupJobTerminal: false,
 };
 
 // The setup-check token stays in the URL fragment, never in an HTTP request URL.
@@ -229,6 +241,7 @@ async function openView(view) {
     else button.removeAttribute("aria-current");
   }
   $("current-section").textContent = view[0].toUpperCase() + view.slice(1);
+  if (view === "overview") await loadMetrics();
   if (view === "files") await loadFiles(state.directory);
   if (view === "console") await loadLogs();
   if (view === "players") await loadPlayers();
@@ -237,12 +250,119 @@ async function openView(view) {
 
 async function refreshView() {
   switch (state.view) {
+    case "overview": await loadMetrics(); break;
     case "files": await loadFiles(state.directory); break;
     case "console": await loadLogs(); break;
     case "players": await loadPlayers(); break;
     case "backups": await loadBackups(); break;
-    default: toast("Panel connection is active.");
   }
+}
+
+const metricLabels = {
+  cpuPercent: "CPU usage", tps: "Ticks per second", mspt: "Time per tick",
+  memoryUsedBytes: "Java memory",
+};
+const metricDurations = {
+  realtime: 60_000, "1m": 60_000, "5m": 300_000, "10m": 600_000,
+  "30m": 1_800_000, "1h": 3_600_000, "12h": 43_200_000,
+  "1d": 86_400_000, "1w": 604_800_000,
+};
+
+function metricText(name, value) {
+  if (!Number.isFinite(value)) return "—";
+  if (name === "cpuPercent") return `${Math.round(value)}%`;
+  if (name === "tps") return value.toFixed(1);
+  if (name === "mspt") return `${value.toFixed(1)} ms`;
+  return formatSize(value);
+}
+
+function shortTime(value, longRange = false) {
+  const date = new Date(value);
+  if (Number.isNaN(date.valueOf())) return "—";
+  return date.toLocaleString(undefined, longRange
+    ? {month: "short", day: "numeric", hour: "2-digit", minute: "2-digit"}
+    : {hour: "2-digit", minute: "2-digit", second: "2-digit"});
+}
+
+async function loadMetrics() {
+  const serial = ++state.metricRequest;
+  const range = state.metricRange;
+  const data = await request(`/api/metrics?range=${encodeURIComponent(range)}`);
+  if (serial !== state.metricRequest || range !== state.metricRange) return;
+  state.metricSamples = Array.isArray(data.samples) ? data.samples : [];
+  state.metricWindow = data;
+  state.lastMetricPoll = Date.now();
+  renderMetrics();
+}
+
+function renderMetrics() {
+  const samples = state.metricSamples;
+  const latest = state.metricWindow?.latest || samples.at(-1);
+  $("stat-cpu").textContent = metricText("cpuPercent", latest?.cpuPercent == null ? NaN : Number(latest.cpuPercent));
+  $("stat-tps").textContent = metricText("tps", latest?.tps == null ? NaN : Number(latest.tps));
+  $("stat-mspt").textContent = metricText("mspt", latest?.mspt == null ? NaN : Number(latest.mspt));
+  $("stat-memory").textContent = metricText("memoryUsedBytes", latest?.memoryUsedBytes == null ? NaN : Number(latest.memoryUsedBytes));
+  $("stat-memory-limit").textContent = latest?.memoryMaxBytes ? `of ${formatSize(latest.memoryMaxBytes)} allocated` : "Heap in use";
+  const players = latest?.players == null ? NaN : Number(latest.players);
+  $("metric-players").textContent = `${Number.isFinite(players) ? players : "—"} ${players === 1 ? "player" : "players"} online`;
+  $("metric-title").textContent = metricLabels[state.metricName];
+  $("metric-updated").textContent = latest ? `Last sample ${shortTime(latest.timestamp)}` : "Waiting for first sample";
+  const coverage = Number(state.metricWindow?.coverageStart);
+  $("metric-coverage").textContent = coverage > 0
+    ? `History available since ${shortTime(coverage, true)}`
+    : "History begins when the panel starts collecting.";
+  if (state.metricWindow?.storageError) $("metric-coverage").textContent += " · History storage unavailable";
+  for (const button of document.querySelectorAll("[data-metric]")) {
+    const active = button.dataset.metric === state.metricName;
+    button.classList.toggle("active", active);
+    button.setAttribute("aria-pressed", String(active));
+  }
+  for (const button of document.querySelectorAll("[data-range]")) {
+    const active = button.dataset.range === state.metricRange;
+    button.classList.toggle("active", active);
+    button.setAttribute("aria-pressed", String(active));
+  }
+  renderMetricChart();
+}
+
+function renderMetricChart() {
+  const name = state.metricName;
+  const values = state.metricSamples.filter(item => item[name] != null && Number.isFinite(Number(item[name])) && Number.isFinite(Number(item.timestamp)));
+  const now = Date.now();
+  const duration = metricDurations[state.metricRange];
+  const from = now - duration;
+  const longRange = duration >= 3_600_000;
+  $("chart-start").textContent = shortTime(from, longRange);
+  $("chart-end").textContent = shortTime(now, longRange);
+  const maxObserved = Math.max(0, ...values.map(item => Number(item[name])));
+  const upper = name === "tps" ? 20 : name === "cpuPercent" ? Math.max(100, Math.ceil(maxObserved / 20) * 20)
+    : name === "mspt" ? Math.max(50, Math.ceil(maxObserved / 10) * 10)
+    : Math.max(Number(values.at(-1)?.memoryMaxBytes) || 0, maxObserved * 1.1, 1);
+  $("chart-max").textContent = metricText(name, upper);
+  $("chart-mid").textContent = metricText(name, upper / 2);
+  $("chart-min").textContent = metricText(name, 0);
+  const plotted = values.filter(item => item.timestamp >= from && item.timestamp <= now + 1000);
+  $("chart-empty").hidden = plotted.length > 0;
+  $("metric-chart").setAttribute("aria-label", `${metricLabels[name]} over the selected ${state.metricRange} range`);
+  if (!plotted.length) {
+    $("chart-line").setAttribute("d", "");
+    $("chart-area").setAttribute("d", "");
+    state.chartPoints = [];
+    return;
+  }
+  const points = plotted.map(item => ({x: Math.max(0, Math.min(900, (item.timestamp - from) / duration * 900)),
+    y: Math.max(0, Math.min(240, 240 - Number(item[name]) / upper * 240)), sample: item}));
+  state.chartPoints = points;
+  const expectedSpacing = {realtime: 1000, "1m": 1000, "5m": 1000, "10m": 2000,
+    "30m": 5000, "1h": 10_000, "12h": 120_000, "1d": 180_000, "1w": 1_200_000}[state.metricRange];
+  const groups = [];
+  for (const point of points) {
+    if (!groups.length || point.sample.timestamp - groups.at(-1).at(-1).sample.timestamp > expectedSpacing * 2.5) groups.push([]);
+    groups.at(-1).push(point);
+  }
+  const shape = group => group.map((point, index) => `${index ? "L" : "M"}${point.x.toFixed(1)},${point.y.toFixed(1)}`).join(" ");
+  $("chart-line").setAttribute("d", groups.map(shape).join(" "));
+  $("chart-area").setAttribute("d", groups.map(group => `${shape(group)} L${group.at(-1).x.toFixed(1)},240 L${group[0].x.toFixed(1)},240 Z`).join(" "));
 }
 
 function renderBreadcrumbs() {
@@ -276,7 +396,7 @@ async function loadFiles(directory) {
       && !(await canCloseEditor())) return;
   if (requestNumber !== state.filesRequest) return;
   state.directory = directory;
-  if (changingFolder) closeEditorNow();
+  if (changingFolder) { closeEditorNow(); state.selectedFiles.clear(); }
   renderBreadcrumbs();
   renderFiles(Array.isArray(data.entries) ? data.entries : []);
 }
@@ -293,8 +413,25 @@ function actionButton(text, action, options = {}) {
 }
 
 function renderFiles(entries) {
+  state.fileEntries = entries;
+  const visible = new Set(entries.map(entry => entry.path));
+  for (const path of state.selectedFiles) if (!visible.has(path)) state.selectedFiles.delete(path);
   const rows = entries.map(entry => {
     const row = node("tr");
+    row.dataset.path = entry.path;
+    row.classList.toggle("selected", state.selectedFiles.has(entry.path));
+    const selectCell = node("td", "select-cell");
+    const checkbox = node("input");
+    checkbox.type = "checkbox";
+    checkbox.checked = state.selectedFiles.has(entry.path);
+    checkbox.setAttribute("aria-label", `Select ${entry.directory ? "folder" : "file"} ${entry.name}`);
+    checkbox.addEventListener("change", () => {
+      if (checkbox.checked) state.selectedFiles.add(entry.path);
+      else state.selectedFiles.delete(entry.path);
+      row.classList.toggle("selected", checkbox.checked);
+      renderSelection();
+    });
+    selectCell.append(checkbox);
     const nameCell = node("td");
     const name = node("button", `file-name${entry.directory ? " folder" : ""}`);
     name.type = "button";
@@ -315,11 +452,84 @@ function renderFiles(entries) {
     }
     group.append(actionButton("Delete", () => deleteFile(entry.path), {danger: true}));
     actions.append(group);
-    row.append(nameCell, size, changed, actions);
+    row.append(selectCell, nameCell, size, changed, actions);
     return row;
   });
   $("file-list").replaceChildren(...rows);
   $("files-empty").hidden = entries.length > 0;
+  renderSelection();
+}
+
+function renderSelection() {
+  const count = state.selectedFiles.size;
+  $("selection-bar").hidden = count === 0;
+  $("selection-count").textContent = `${count} ${count === 1 ? "item" : "items"} selected`;
+  const all = $("select-all-files");
+  all.disabled = state.fileEntries.length === 0;
+  all.checked = count > 0 && count === state.fileEntries.length;
+  all.indeterminate = count > 0 && count < state.fileEntries.length;
+}
+
+function selectedPaths() { return [...state.selectedFiles]; }
+
+async function zipSelection() {
+  const paths = selectedPaths();
+  if (!paths.length) return;
+  const defaultName = childPath(state.directory, `selected-${new Date().toISOString().slice(0, 10)}.zip`);
+  const archive = field("New ZIP path from server root", defaultName, {maxLength: 1024});
+  const answer = await review({title: `Archive ${paths.length} selected ${paths.length === 1 ? "item" : "items"}?`,
+    description: "The selected files and folders will be copied into one ZIP archive. Originals stay in place.",
+    confirm: "Create ZIP", fields: [archive]});
+  if (!answer) return;
+  await request("/api/files/zip", {method: "POST", body: {paths, archive: answer[0].trim()}});
+  toast("ZIP archive created.");
+  state.selectedFiles.clear();
+  await loadFiles(state.directory);
+}
+
+async function downloadSelection() {
+  const paths = selectedPaths();
+  if (!paths.length) return;
+  const button = $("bulk-download");
+  setBusy(button, true, "Preparing TAR…");
+  try {
+    const response = await fetch("/api/files/tar", {method: "POST", credentials: "same-origin", cache: "no-store",
+      headers: {"Accept": "application/octet-stream", "Content-Type": "application/json", "X-CSRF-Token": state.csrf},
+      body: JSON.stringify({paths})});
+    if (!response.ok) {
+      const result = await response.json().catch(() => ({}));
+      if (response.status === 401) { state.csrf = null; showAuth(true); }
+      throw new Error(result.error || `Download failed (${response.status})`);
+    }
+    const blob = await response.blob();
+    const address = URL.createObjectURL(blob);
+    const link = node("a");
+    link.href = address;
+    link.download = "selected-server-files.tar";
+    link.hidden = true;
+    document.body.append(link);
+    link.click();
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(address), 60_000);
+    toast(`${paths.length} selected ${paths.length === 1 ? "item" : "items"} downloaded as TAR.`);
+  } finally { setBusy(button, false); }
+}
+
+async function deleteSelection() {
+  const paths = selectedPaths();
+  if (!paths.length) return;
+  const preview = paths.slice(0, 4).join(", ") + (paths.length > 4 ? ` and ${paths.length - 4} more` : "");
+  const answer = await review({eyebrow: "PERMANENT CHANGE", title: `Delete ${paths.length} selected ${paths.length === 1 ? "item" : "items"}?`,
+    description: `This removes ${preview}, including the contents of selected folders. There is no undo in the panel.`,
+    confirm: "Delete selected", danger: true});
+  if (!answer) return;
+  const closesEditor = state.editor && paths.some(path => state.editor.path === path || state.editor.path.startsWith(`${path}/`));
+  if (closesEditor && !(await canCloseEditor())) return;
+  await request("/api/files/bulk", {method: "DELETE", body: {paths, confirmPaths: paths}});
+  if (closesEditor) closeEditorNow();
+  state.selectedFiles.clear();
+  toast(`${paths.length} ${paths.length === 1 ? "item" : "items"} deleted.`);
+  await loadFiles(state.directory);
 }
 
 async function createFile(directory) {
@@ -511,19 +721,36 @@ async function download(url, filename) {
   setTimeout(() => URL.revokeObjectURL(objectUrl), 60_000);
 }
 
-async function loadLogs() {
-  const data = await request("/api/logs");
-  const container = $("console-lines");
-  const atBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 70;
-  const lines = (Array.isArray(data.lines) ? data.lines : []).map(line => {
-    const row = node("div", "console-line");
-    const time = node("time", "", new Date(line.timestamp).toLocaleTimeString());
-    const level = String(line.level || "INFO").toLowerCase();
-    row.append(time, node("span", `console-level ${level === "warning" || level === "severe" ? level : ""}`, line.level || "INFO"), node("span", "console-message", line.message || ""));
-    return row;
-  });
-  container.replaceChildren(...(lines.length ? lines : [node("div", "empty-state", "No recent log messages.")]));
-  if (atBottom) container.scrollTop = container.scrollHeight;
+async function loadLogs(reset = false) {
+  if (state.consoleLoading) return;
+  state.consoleLoading = true;
+  try {
+    if (reset) state.consoleCursor = null;
+    const suffix = state.consoleCursor ? `?cursor=${encodeURIComponent(state.consoleCursor)}` : "";
+    const data = await request(`/api/console/output${suffix}`);
+    const container = $("console-lines");
+    const nearBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 80;
+    if (reset || data.reset) container.replaceChildren();
+    const lines = Array.isArray(data.lines) ? data.lines : [];
+    for (const line of lines) {
+      const text = String(line);
+      const severity = /\b(?:ERROR|SEVERE|FATAL)\b/.test(text) ? "severe" : /\bWARN(?:ING)?\b/.test(text) ? "warning" : "";
+      container.append(node("div", `console-line ${severity}`, text));
+    }
+    while (container.childElementCount > 1000) container.firstElementChild.remove();
+    state.consoleCursor = data.cursor || null;
+    if (!data.available && !container.childElementCount) {
+      container.append(node("div", "empty-state", "The Minecraft log is not available yet. Start the server and refresh."));
+    }
+    if (data.available && !container.childElementCount) {
+      container.append(node("div", "empty-state", "No console output yet."));
+    }
+    if (lines.length && container.firstElementChild?.classList.contains("empty-state")) container.firstElementChild.remove();
+    if ($("console-follow").checked && nearBottom) container.scrollTop = container.scrollHeight;
+    $("console-status").textContent = data.available
+      ? ` Live · ${shortTime(Date.now())}${data.truncated ? " · Older lines omitted" : ""}`
+      : " Waiting for latest.log";
+  } finally { state.consoleLoading = false; }
 }
 
 async function runCommand(form) {
@@ -536,7 +763,7 @@ async function runCommand(form) {
     if (!result.accepted) throw new Error("The server did not accept that command. Check spelling and the console log.");
     form.reset();
     toast("Command sent to the server.");
-    await loadLogs();
+    setTimeout(() => loadLogs().catch(fail), 500);
   } finally { setBusy(button, false); }
 }
 
@@ -592,18 +819,71 @@ async function loadBackups() {
     return row;
   });
   $("backup-list").replaceChildren(...(rows.length ? rows : [node("div", "empty-state", "No backups yet. Create one before your next big change.")]));
+  if (!state.backupJobId) {
+    const current = await request("/api/backups/latest");
+    if (current.job) { state.backupJobId = current.job.id; renderBackupJob(current.job); }
+  }
+}
+
+function renderBackupJob(job) {
+  state.backupJobTerminal = ["completed", "failed"].includes(job.phase);
+  const box = $("backup-progress");
+  box.hidden = false;
+  const phaseNames = {queued: "Waiting to start", saving: "Saving loaded worlds", scanning: "Measuring files",
+    archiving: "Creating ZIP archive", completed: "Backup ready", failed: "Backup failed"};
+  $("backup-phase").textContent = phaseNames[job.phase] || "Preparing backup";
+  const bar = $("backup-progress-bar");
+  const total = Number(job.totalBytes);
+  const done = Number(job.bytesDone);
+  if (job.phase === "completed") {
+    bar.value = 100;
+    $("backup-percent").textContent = "100%";
+    $("backup-progress-detail").textContent = `${job.backup?.name || "Archive"} · ${formatSize(job.backup?.size)}`;
+  } else if (job.phase === "archiving" && total > 0) {
+    const percent = Math.min(99, Math.max(0, Math.round(done / total * 100)));
+    bar.value = percent;
+    $("backup-percent").textContent = `${percent}%`;
+    $("backup-progress-detail").textContent = `${formatSize(done)} of ${formatSize(total)} · ${job.filesDone || 0} of ${job.totalFiles || 0} files`;
+  } else if (job.phase === "failed") {
+    bar.removeAttribute("value");
+    $("backup-percent").textContent = "Failed";
+    $("backup-progress-detail").textContent = job.error || "The archive could not be completed. Check the server log.";
+  } else {
+    bar.removeAttribute("value");
+    $("backup-percent").textContent = "…";
+    $("backup-progress-detail").textContent = job.phase === "scanning"
+      ? "Counting files and bytes before archiving." : "Paper is saving loaded worlds before the archive begins.";
+  }
+  $("create-backup").disabled = !["completed", "failed"].includes(job.phase);
+}
+
+async function pollBackupJob() {
+  if (!state.backupJobId || state.backupJobTerminal || state.backupPolling || !state.csrf) return;
+  state.backupPolling = true;
+  try {
+    const job = await request(`/api/backups/job?id=${encodeURIComponent(state.backupJobId)}`);
+    const previous = $("backup-phase").textContent;
+    renderBackupJob(job);
+    if (job.phase === "completed" && previous !== "Backup ready") {
+      toast(`${job.backup?.name || "Backup"} created.`);
+      if (state.view === "backups") await loadBackups();
+    }
+    if (job.phase === "failed" && previous !== "Backup failed") toast(job.error || "Backup failed.", true);
+  } finally { state.backupPolling = false; }
 }
 
 async function createBackup() {
   const answer = await review({title: "Create a live server archive?", description: "Paper saves loaded worlds, then this panel archives the running server's process folder. Worlds outside that folder are excluded, and files can change during copying.", confirm: "Create backup"});
   if (!answer) return;
   const button = $("create-backup");
-  setBusy(button, true, "Creating…");
+  setBusy(button, true, "Starting…");
   try {
-    const backup = await request("/api/backups", {method: "POST"});
-    toast(`${backup.name} created.`);
-    await loadBackups();
-  } finally { setBusy(button, false); }
+    const job = await request("/api/backups", {method: "POST"});
+    state.backupJobId = job.id;
+    state.backupJobTerminal = false;
+    renderBackupJob(job);
+    toast("Backup started. Progress will appear here.");
+  } finally { setBusy(button, false); if (state.backupJobId && !state.backupJobTerminal) $("create-backup").disabled = true; }
 }
 
 async function deleteBackup(name) {
@@ -673,6 +953,15 @@ listen("upload-input", "change", async event => {
   await uploadFile(file);
 });
 listen("refresh-files", "click", () => loadFiles(state.directory));
+listen("select-all-files", "change", event => {
+  if (event.currentTarget.checked) state.fileEntries.forEach(entry => state.selectedFiles.add(entry.path));
+  else state.selectedFiles.clear();
+  renderFiles(state.fileEntries);
+});
+listen("clear-selection", "click", () => { state.selectedFiles.clear(); renderFiles(state.fileEntries); });
+listen("bulk-zip", "click", zipSelection);
+listen("bulk-download", "click", downloadSelection);
+listen("bulk-delete", "click", deleteSelection);
 listen("zip-file", "click", () => zipFile());
 listen("unzip-file", "click", () => unzipFile());
 listen("close-editor", "click", async () => { if (await canCloseEditor()) closeEditorNow(); });
@@ -687,11 +976,38 @@ listen("editor-text", "keydown", event => {
     saveEditor().catch(fail);
   }
 });
-listen("refresh-logs", "click", loadLogs);
+listen("refresh-logs", "click", () => loadLogs(true));
 listen("command-form", "submit", event => { event.preventDefault(); return runCommand(event.currentTarget); });
 listen("refresh-players", "click", loadPlayers);
 listen("player-form", "submit", event => { event.preventDefault(); return playerAction(event.currentTarget); });
 listen("refresh-backups", "click", loadBackups);
 listen("create-backup", "click", createBackup);
-setInterval(() => { if (state.csrf && state.view === "console") loadLogs().catch(fail); }, 5000);
+for (const button of document.querySelectorAll("[data-metric]")) {
+  button.addEventListener("click", () => { state.metricName = button.dataset.metric; renderMetrics(); });
+}
+for (const button of document.querySelectorAll("[data-range]")) {
+  button.addEventListener("click", () => {
+    state.metricRange = button.dataset.range;
+    renderMetrics();
+    loadMetrics().catch(fail);
+  });
+}
+$("metric-chart").addEventListener("mousemove", event => {
+  const points = state.chartPoints || [];
+  if (!points.length) return;
+  const plot = $("metric-chart").getBoundingClientRect();
+  const x = (event.clientX - plot.left) / plot.width * 900;
+  const nearest = points.reduce((best, point) => Math.abs(point.x - x) < Math.abs(best.x - x) ? point : best);
+  const tooltip = $("chart-tooltip");
+  tooltip.textContent = `${shortTime(nearest.sample.timestamp, state.metricRange === "1d" || state.metricRange === "1w")} · ${metricText(state.metricName, Number(nearest.sample[state.metricName]))}`;
+  tooltip.style.left = `${Math.max(0, Math.min(plot.width - 170, event.clientX - plot.left + 12))}px`;
+  tooltip.hidden = false;
+});
+$("metric-chart").addEventListener("mouseleave", () => { $("chart-tooltip").hidden = true; });
+setInterval(() => {
+  if (!state.csrf) return;
+  if (state.view === "console") loadLogs().catch(fail);
+  if (state.view === "overview" && Date.now() - (state.lastMetricPoll || 0) >= (state.metricRange === "realtime" ? 1000 : 15_000)) loadMetrics().catch(fail);
+  if (state.backupJobId && !state.backupJobTerminal) pollBackupJob().catch(fail);
+}, 1500);
 boot();

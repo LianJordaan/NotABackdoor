@@ -59,7 +59,9 @@ class PanelRaceTest {
         int completed = 0;
         try (PanelFiles files = new PanelFiles(fixture.root);
              Flipper flipper = new Flipper(fixture.root, fixture.outside)) {
-            for (int attempt = 0; attempt < 100; attempt++) {
+            // Concurrent prevalidation can legitimately abort many attempts while the
+            // directory is between moves; keep trying until one archive completes.
+            for (int attempt = 0; attempt < 1_000 && (attempt < 100 || completed == 0); attempt++) {
                 String archive = "archive-" + attempt + ".zip";
                 try {
                     files.zip("sub", archive);

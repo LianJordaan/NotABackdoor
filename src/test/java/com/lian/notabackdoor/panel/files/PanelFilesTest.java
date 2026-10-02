@@ -12,9 +12,13 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.SecureDirectoryStream;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.zip.ZipEntry;
+import java.util.zip.ZipInputStream;
 import java.util.zip.ZipOutputStream;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -108,6 +112,129 @@ class PanelFilesTest {
         files.zip("plugins", "archive.zip");
         files.unzip("archive.zip", "restored");
         assertEquals("enabled: true\n", Files.readString(directory.resolve("restored/plugins/config.yml")));
+    }
+
+    @Test
+    void selectedFilesAndFoldersShareOneZipOrTarWithRelativePaths() throws IOException {
+        Files.createDirectories(directory.resolve("world/data"));
+        Files.writeString(directory.resolve("world/level.dat"), "level");
+        Files.writeString(directory.resolve("world/data/map.txt"), "map");
+        Files.writeString(directory.resolve("world/extra.txt"), "extra");
+        try (PanelFiles files = new PanelFiles(directory)) {
+            List<String> selected = List.of("world/level.dat", "world/data");
+            files.zip(selected, "world/selected.zip");
+            Map<String, String> zipped = new HashMap<>();
+            try (ZipInputStream zip = new ZipInputStream(Files.newInputStream(directory.resolve("world/selected.zip")))) {
+                ZipEntry entry;
+                while ((entry = zip.getNextEntry()) != null) {
+                    zipped.put(entry.getName(), new String(zip.readAllBytes(), StandardCharsets.UTF_8));
+                }
+            }
+            assertEquals("level", zipped.get("level.dat"));
+            assertEquals("map", zipped.get("data/map.txt"));
+            assertTrue(zipped.containsKey("data/"));
+
+            Path temporary;
+            try (PanelFiles.DownloadArchive archive = files.tar(selected)) {
+                assertEquals("server-files.tar", archive.name());
+                assertTrue(archive.size() > 0);
+                temporary = archive.temporaryPath();
+                assertFalse(temporary.startsWith(directory));
+                Map<String, String> tarred = readTar(archive.input().readAllBytes());
+                assertEquals("level", tarred.get("level.dat"));
+                assertEquals("map", tarred.get("data/map.txt"));
+                assertTrue(tarred.containsKey("data/"));
+            }
+            assertFalse(Files.exists(temporary));
+        }
+    }
+
+    @Test
+    void bulkDeletionValidatesSelectionBeforeDeletingAndRejectsOverlaps() throws IOException {
+        Files.createDirectories(directory.resolve("world/data"));
+        Files.writeString(directory.resolve("world/data/map.txt"), "map");
+        Files.writeString(directory.resolve("world/extra.txt"), "extra");
+        try (PanelFiles files = new PanelFiles(directory)) {
+            assertThrows(IllegalArgumentException.class,
+                    () -> files.deleteMany(List.of("world/extra.txt", "world/missing.txt")));
+            assertTrue(Files.exists(directory.resolve("world/extra.txt")));
+            assertThrows(IllegalArgumentException.class,
+                    () -> files.deleteMany(List.of("world", "world/data")));
+            assertThrows(IllegalArgumentException.class,
+                    () -> files.zip(List.of("world/data", "world/data"), "archive.zip"));
+            assertThrows(IllegalArgumentException.class,
+                    () -> files.zip(List.of("world/data"), "world/data/archive.zip"));
+            assertFalse(Files.exists(directory.resolve("world/data/archive.zip")));
+            files.deleteMany(List.of("world/data", "world/extra.txt"));
+            assertFalse(Files.exists(directory.resolve("world/data")));
+            assertFalse(Files.exists(directory.resolve("world/extra.txt")));
+        }
+    }
+
+    @Test
+    void archivesDoNotFollowSelectedOrNestedSymlinks() throws IOException {
+        Path outside = Files.createDirectory(directory.resolve("outside"));
+        Path root = Files.createDirectory(directory.resolve("root"));
+        Files.writeString(outside.resolve("secret.txt"), "outside-secret");
+        Files.createDirectory(root.resolve("inside"));
+        Files.writeString(root.resolve("inside/safe.txt"), "inside-file");
+        Files.createSymbolicLink(root.resolve("linked"), outside.resolve("secret.txt"));
+        Files.createSymbolicLink(root.resolve("inside/linked"), outside.resolve("secret.txt"));
+        try (PanelFiles files = new PanelFiles(root)) {
+            assertThrows(SecurityException.class, () -> files.tar(List.of("linked")));
+            assertThrows(SecurityException.class, () -> files.tar(List.of("inside")));
+            assertThrows(SecurityException.class, () -> files.zip(List.of("inside"), "archive.zip"));
+            assertFalse(Files.exists(root.resolve("archive.zip")));
+            files.deleteMany(List.of("inside"));
+            assertFalse(Files.exists(root.resolve("inside")));
+            assertEquals("outside-secret", Files.readString(outside.resolve("secret.txt")));
+        }
+    }
+
+    @Test
+    void tarSupportsLongUnicodePathsAndRefusesOversizeSources() throws IOException {
+        String folder = "é".repeat(80);
+        Files.createDirectory(directory.resolve(folder));
+        Files.writeString(directory.resolve(folder).resolve("漢字.txt"), "unicode");
+        try (PanelFiles files = new PanelFiles(directory);
+             PanelFiles.DownloadArchive archive = files.tar(List.of(folder))) {
+            assertEquals("unicode", readTar(archive.input().readAllBytes()).get(folder + "/漢字.txt"));
+        }
+        Path sparse = directory.resolve("large.bin");
+        try (RandomAccessFile file = new RandomAccessFile(sparse.toFile(), "rw")) {
+            file.setLength(1024L * 1024 * 1024 + 1);
+        }
+        try (PanelFiles files = new PanelFiles(directory)) {
+            assertThrows(IOException.class, () -> files.tar(List.of("large.bin")));
+        }
+    }
+
+    private static Map<String, String> readTar(byte[] bytes) {
+        Map<String, String> entries = new HashMap<>();
+        String extendedPath = null;
+        for (int offset = 0; offset + 512 <= bytes.length; ) {
+            String name = tarString(bytes, offset, 100);
+            if (name.isEmpty()) break;
+            long size = Long.parseLong(tarString(bytes, offset + 124, 12).trim(), 8);
+            char type = (char) bytes[offset + 156];
+            offset += 512;
+            String content = new String(bytes, offset, (int) size, StandardCharsets.UTF_8);
+            if (type == 'x') {
+                int separator = content.indexOf(' ');
+                extendedPath = content.substring(separator + " path=".length(), content.length() - 1);
+            } else {
+                entries.put(extendedPath == null ? name : extendedPath, content);
+                extendedPath = null;
+            }
+            offset += (int) ((size + 511) / 512) * 512;
+        }
+        return entries;
+    }
+
+    private static String tarString(byte[] bytes, int offset, int size) {
+        int end = offset;
+        while (end < offset + size && bytes[end] != 0) end++;
+        return new String(bytes, offset, end - offset, StandardCharsets.US_ASCII);
     }
 
     @Test

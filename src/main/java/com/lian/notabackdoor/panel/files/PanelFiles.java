@@ -7,9 +7,11 @@ import java.io.InputStream;
 import java.io.OutputStream;
 import java.nio.ByteBuffer;
 import java.nio.channels.Channels;
+import java.nio.channels.SeekableByteChannel;
 import java.nio.charset.CharacterCodingException;
 import java.nio.charset.CodingErrorAction;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.nio.file.SecureDirectoryStream;
@@ -34,6 +36,8 @@ public final class PanelFiles implements AutoCloseable {
     private static final long MAX_EXPANDED_BYTES = 1024L * 1024 * 1024;
     private static final int MAX_ARCHIVE_ENTRIES = 20_000;
     private static final int MAX_LIST_ENTRIES = 2_000;
+    private static final int MAX_SELECTIONS = 2_000;
+    private static final byte[] TAR_PADDING = new byte[512];
     private final SecureFileRoot files;
 
     public PanelFiles(Path root) throws IOException { files = new SecureFileRoot(root); }
@@ -169,27 +173,36 @@ public final class PanelFiles implements AutoCloseable {
     }
 
     public synchronized void zip(String sourcePath, String archivePath) throws IOException {
-        List<String> sourceSegments = PathGuard.segments(sourcePath);
+        zip(List.of(sourcePath), archivePath);
+    }
+
+    /** Creates one ZIP from the selected files and directories, relative to their common parent. */
+    public synchronized void zip(List<String> sourcePaths, String archivePath) throws IOException {
+        List<Source> sources = sources(sourcePaths);
         List<String> archiveSegments = PathGuard.segments(archivePath);
-        if (sourceSegments.isEmpty() || archiveSegments.isEmpty()) {
+        if (archiveSegments.isEmpty()) {
             throw new IllegalArgumentException("A path below the file root is required");
         }
-        if (archiveSegments.size() >= sourceSegments.size()
-                && archiveSegments.subList(0, sourceSegments.size()).equals(sourceSegments)) {
-            throw new IllegalArgumentException("An archive cannot be placed inside its source");
+        for (Source source : sources) {
+            if (containsPath(archiveSegments, source.segments)) {
+                throw new IllegalArgumentException("An archive cannot be placed inside its source");
+            }
         }
-        try (SecureFileRoot.Leaf source = files.leaf(sourcePath);
-             SecureFileRoot.Leaf archive = files.leaf(archivePath)) {
-            BasicFileAttributes existing = files.attributesOrNull(source.parent.stream, source.name);
-            if (existing == null || existing.isSymbolicLink()
-                    || files.attributesOrNull(archive.parent.stream, archive.name) != null) {
-                throw new IllegalArgumentException("Invalid archive source or destination");
+        try (SecureFileRoot.Leaf archive = files.leaf(archivePath)) {
+            if (files.attributesOrNull(archive.parent.stream, archive.name) != null) {
+                throw new IllegalArgumentException("Archive destination is occupied");
             }
             SecureFileRoot.TempFile temporary = files.temporaryFile(archive.parent.stream, ".nab-zip-");
             try {
                 try (temporary; ZipOutputStream output = new ZipOutputStream(Channels.newOutputStream(temporary.channel()))) {
-                    zipEntry(source.parent.stream, source.name, source.name.toString(), output,
-                            new long[]{0}, new int[]{0});
+                    long[] total = {0};
+                    int[] count = {0};
+                    for (Source source : sources) {
+                        try (SecureFileRoot.Leaf opened = files.leaf(source.path)) {
+                            zipEntry(opened.parent.stream, opened.name, source.archiveName,
+                                    output, total, count);
+                        }
+                    }
                 }
                 archive.parent.stream.move(temporary.name(), archive.parent.stream, archive.name);
             } finally {
@@ -203,7 +216,8 @@ public final class PanelFiles implements AutoCloseable {
     private void zipEntry(SecureDirectoryStream<Path> parent, Path name, String entryName,
                           ZipOutputStream output, long[] total, int[] count) throws IOException {
         BasicFileAttributes attributes = files.attributesOrNull(parent, name);
-        if (attributes == null || attributes.isSymbolicLink()) return;
+        if (attributes == null) throw new IOException("Archive source changed during creation");
+        if (attributes.isSymbolicLink()) throw new SecurityException("Symbolic links cannot be archived");
         if (++count[0] > MAX_ARCHIVE_ENTRIES) throw new IOException("Archive has too many entries");
         if (attributes.isDirectory()) {
             output.putNextEntry(new ZipEntry(entryName + "/"));
@@ -225,6 +239,229 @@ public final class PanelFiles implements AutoCloseable {
                 total[0] += copyBounded(opened.input(), output, MAX_EXPANDED_BYTES - total[0]);
             }
             output.closeEntry();
+        } else throw new IOException("Only regular files and directories can be archived");
+    }
+
+    /** Returns a temporary TAR outside the selectable server root. Always close after sending it. */
+    public synchronized DownloadArchive tar(List<String> sourcePaths) throws IOException {
+        List<Source> sources = sources(sourcePaths);
+        Path temporary = Files.createTempFile("nab-download-", ".tar").toAbsolutePath().normalize();
+        if (temporary.startsWith(files.rootPath())) {
+            Files.deleteIfExists(temporary);
+            throw new IOException("The temporary download directory must be outside the server file root");
+        }
+        SeekableByteChannel channel = null;
+        try {
+            channel = Files.newByteChannel(temporary,
+                    Set.of(StandardOpenOption.READ, StandardOpenOption.WRITE, LinkOption.NOFOLLOW_LINKS));
+            OutputStream output = Channels.newOutputStream(channel);
+            long[] total = {0};
+            int[] count = {0};
+            for (Source source : sources) {
+                try (SecureFileRoot.Leaf opened = files.leaf(source.path)) {
+                    tarEntry(opened.parent.stream, opened.name, source.archiveName, output, total, count);
+                }
+            }
+            output.write(TAR_PADDING);
+            output.write(TAR_PADDING);
+            channel.position(0);
+            return new DownloadArchive("server-files.tar", temporary, channel);
+        } catch (IOException | RuntimeException failure) {
+            if (channel != null) channel.close();
+            Files.deleteIfExists(temporary);
+            throw failure;
+        }
+    }
+
+    /** Validates the whole selection before deleting any item. A later filesystem error may still be partial. */
+    public synchronized void deleteMany(List<String> sourcePaths) throws IOException {
+        List<Source> sources = sources(sourcePaths);
+        for (Source source : sources) {
+            try (SecureFileRoot.Leaf target = files.leaf(source.path)) {
+                BasicFileAttributes existing = files.attributesOrNull(target.parent.stream, target.name);
+                if (existing == null) throw new IllegalArgumentException("Path does not exist: " + source.path);
+                if (existing.isSymbolicLink()) throw new SecurityException("Symbolic links are not accessible from the panel");
+                files.deleteTree(target.parent.stream, target.name);
+            }
+        }
+    }
+
+    private List<Source> sources(List<String> sourcePaths) throws IOException {
+        Objects.requireNonNull(sourcePaths, "sourcePaths");
+        if (sourcePaths.isEmpty() || sourcePaths.size() > MAX_SELECTIONS) {
+            throw new IllegalArgumentException("Select between 1 and 2,000 files or folders");
+        }
+        List<List<String>> paths = new ArrayList<>(sourcePaths.size());
+        for (String path : sourcePaths) {
+            List<String> segments = PathGuard.segments(path);
+            if (segments.isEmpty()) throw new IllegalArgumentException("The file root cannot be selected");
+            for (List<String> previous : paths) {
+                if (containsPath(segments, previous) || containsPath(previous, segments)) {
+                    throw new IllegalArgumentException("The selection contains duplicate or overlapping paths");
+                }
+            }
+            try (SecureFileRoot.Leaf opened = files.leaf(path)) {
+                BasicFileAttributes attributes = files.attributesOrNull(opened.parent.stream, opened.name);
+                if (attributes == null) throw new IllegalArgumentException("Path does not exist: " + path);
+                if (attributes.isSymbolicLink()) throw new SecurityException("Symbolic links are not accessible from the panel");
+                if (!attributes.isDirectory() && !attributes.isRegularFile()) {
+                    throw new IllegalArgumentException("Only regular files and directories can be selected");
+                }
+            }
+            paths.add(segments);
+        }
+        List<String> commonParent = new ArrayList<>(paths.get(0).subList(0, paths.get(0).size() - 1));
+        for (List<String> path : paths) {
+            while (!containsPath(path.subList(0, path.size() - 1), commonParent)) {
+                commonParent.remove(commonParent.size() - 1);
+            }
+        }
+        List<Source> sources = new ArrayList<>(paths.size());
+        for (int index = 0; index < paths.size(); index++) {
+            List<String> segments = paths.get(index);
+            sources.add(new Source(sourcePaths.get(index), segments,
+                    String.join("/", segments.subList(commonParent.size(), segments.size()))));
+        }
+        return sources;
+    }
+
+    private static boolean containsPath(List<String> path, List<String> prefix) {
+        return path.size() >= prefix.size() && path.subList(0, prefix.size()).equals(prefix);
+    }
+
+    private void tarEntry(SecureDirectoryStream<Path> parent, Path name, String entryName,
+                          OutputStream output, long[] total, int[] count) throws IOException {
+        BasicFileAttributes attributes = files.attributesOrNull(parent, name);
+        if (attributes == null) throw new IOException("Archive source changed during creation");
+        if (attributes.isSymbolicLink()) throw new SecurityException("Symbolic links cannot be archived");
+        if (++count[0] > MAX_ARCHIVE_ENTRIES) throw new IOException("Archive has too many entries");
+        long modified = Math.max(0, attributes.lastModifiedTime().toMillis() / 1000);
+        if (attributes.isDirectory()) {
+            writeTarHeader(output, entryName + "/", 0, modified, '5');
+            try (SecureDirectoryStream<Path> directory = parent.newDirectoryStream(name, LinkOption.NOFOLLOW_LINKS)) {
+                for (Path child : directory) {
+                    Path childName = child.getFileName();
+                    try { PathGuard.segments(childName.toString()); }
+                    catch (IllegalArgumentException unsafeName) {
+                        throw new IOException("Archive source contains an unsafe name", unsafeName);
+                    }
+                    tarEntry(directory, childName, entryName + "/" + childName, output, total, count);
+                }
+            }
+        } else if (attributes.isRegularFile()) {
+            if (attributes.size() > MAX_EXPANDED_BYTES - total[0]) {
+                throw new IOException("Archive source exceeded the 1 GiB limit");
+            }
+            try (SecureFileRoot.OpenedFile opened = files.openRegularFile(parent, name)) {
+                long size = opened.size();
+                if (size > MAX_EXPANDED_BYTES - total[0]) {
+                    throw new IOException("Archive source exceeded the 1 GiB limit");
+                }
+                writeTarHeader(output, entryName, size, modified, '0');
+                copyExactly(opened.input(), output, size);
+                padTar(output, size);
+                total[0] += size;
+            }
+        } else throw new IOException("Only regular files and directories can be archived");
+    }
+
+    private static void writeTarHeader(OutputStream output, String path, long size, long modified, char type)
+            throws IOException {
+        byte[] name = path.getBytes(StandardCharsets.UTF_8);
+        if (name.length > 4_096) throw new IOException("Archive path is too long");
+        String headerName = path;
+        if (name.length > 100 || !StandardCharsets.US_ASCII.newEncoder().canEncode(path)) {
+            byte[] extendedPath = paxPath(path);
+            output.write(tarHeader("PaxHeaders/path", extendedPath.length, modified, 'x'));
+            output.write(extendedPath);
+            padTar(output, extendedPath.length);
+            headerName = "item";
+        }
+        output.write(tarHeader(headerName, size, modified, type));
+    }
+
+    private static byte[] paxPath(String path) {
+        byte[] value = ("path=" + path + "\n").getBytes(StandardCharsets.UTF_8);
+        int length = value.length + 2;
+        while (true) {
+            byte[] prefix = (length + " ").getBytes(StandardCharsets.US_ASCII);
+            int actual = prefix.length + value.length;
+            if (actual == length) {
+                byte[] record = new byte[actual];
+                System.arraycopy(prefix, 0, record, 0, prefix.length);
+                System.arraycopy(value, 0, record, prefix.length, value.length);
+                return record;
+            }
+            length = actual;
+        }
+    }
+
+    private static byte[] tarHeader(String name, long size, long modified, char type) throws IOException {
+        byte[] header = new byte[512];
+        putAscii(header, 0, 100, name);
+        putOctal(header, 100, 8, type == '5' ? 0755 : 0644);
+        putOctal(header, 108, 8, 0);
+        putOctal(header, 116, 8, 0);
+        putOctal(header, 124, 12, size);
+        putOctal(header, 136, 12, modified);
+        for (int i = 148; i < 156; i++) header[i] = ' ';
+        header[156] = (byte) type;
+        putAscii(header, 257, 6, "ustar");
+        putAscii(header, 263, 2, "00");
+        long checksum = 0;
+        for (byte item : header) checksum += Byte.toUnsignedInt(item);
+        putOctal(header, 148, 7, checksum);
+        header[155] = ' ';
+        return header;
+    }
+
+    private static void putAscii(byte[] bytes, int offset, int length, String value) throws IOException {
+        byte[] encoded = value.getBytes(StandardCharsets.US_ASCII);
+        if (encoded.length > length) throw new IOException("Archive header field is too long");
+        System.arraycopy(encoded, 0, bytes, offset, encoded.length);
+    }
+
+    private static void putOctal(byte[] bytes, int offset, int length, long value) throws IOException {
+        String encoded = Long.toOctalString(value);
+        if (value < 0 || encoded.length() > length - 1) throw new IOException("Archive numeric field is too large");
+        for (int index = 0; index < length - encoded.length() - 1; index++) bytes[offset + index] = '0';
+        putAscii(bytes, offset + length - encoded.length() - 1, encoded.length(), encoded);
+    }
+
+    private static void padTar(OutputStream output, long size) throws IOException {
+        int padding = (int) ((512 - size % 512) % 512);
+        output.write(TAR_PADDING, 0, padding);
+    }
+
+    private static void copyExactly(InputStream source, OutputStream target, long size) throws IOException {
+        byte[] buffer = new byte[64 * 1024];
+        long remaining = size;
+        while (remaining > 0) {
+            int read = source.read(buffer, 0, (int) Math.min(buffer.length, remaining));
+            if (read < 0) throw new IOException("Archive source changed during creation");
+            target.write(buffer, 0, read);
+            remaining -= read;
+        }
+    }
+
+    private record Source(String path, List<String> segments, String archiveName) { }
+
+    public static final class DownloadArchive implements AutoCloseable {
+        private final String name;
+        private final Path temporary;
+        private final SeekableByteChannel channel;
+        private DownloadArchive(String name, Path temporary, SeekableByteChannel channel) {
+            this.name = name;
+            this.temporary = temporary;
+            this.channel = channel;
+        }
+        public String name() { return name; }
+        public long size() throws IOException { return channel.size(); }
+        public InputStream input() { return Channels.newInputStream(channel); }
+        Path temporaryPath() { return temporary; }
+        @Override public void close() throws IOException {
+            try { channel.close(); }
+            finally { Files.deleteIfExists(temporary); }
         }
     }
 

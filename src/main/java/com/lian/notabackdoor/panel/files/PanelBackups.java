@@ -14,7 +14,14 @@ import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
-import java.util.concurrent.locks.ReentrantLock;
+import java.util.Map;
+import java.util.UUID;
+import java.util.concurrent.Callable;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
 
@@ -27,7 +34,13 @@ public final class PanelBackups implements AutoCloseable {
     private final SecureFileRoot files;
     private final String directory;
     private final Clock clock;
-    private final ReentrantLock running = new ReentrantLock();
+    private final AtomicBoolean running = new AtomicBoolean();
+    private final ExecutorService jobs = Executors.newSingleThreadExecutor(task -> {
+        Thread thread = new Thread(task, "notabackdoor-backup");
+        thread.setDaemon(true);
+        return thread;
+    });
+    private final Map<String, Job> recentJobs = new ConcurrentHashMap<>();
 
     public PanelBackups(Path root, Path directory) throws IOException {
         this(root, directory, Clock.systemUTC());
@@ -67,7 +80,64 @@ public final class PanelBackups implements AutoCloseable {
     }
 
     public Backup create() throws IOException {
-        if (!running.tryLock()) throw new IllegalStateException("A backup is already in progress");
+        if (!running.compareAndSet(false, true)) throw new IllegalStateException("A backup is already in progress");
+        try { return createArchive(null); }
+        finally { running.set(false); }
+    }
+
+    /** Start an archive without holding an HTTP worker for the duration of the copy. */
+    public BackupJob start(Callable<Void> saveWorlds) {
+        if (!running.compareAndSet(false, true)) throw new IllegalStateException("A backup is already in progress");
+        Job job = new Job(UUID.randomUUID().toString(), clock.millis());
+        recentJobs.put(job.id, job);
+        if (recentJobs.size() > 16) {
+            recentJobs.values().stream().sorted(Comparator.comparingLong(value -> value.startedAt))
+                    .limit(recentJobs.size() - 16L).forEach(value -> recentJobs.remove(value.id, value));
+        }
+        try {
+            jobs.execute(() -> {
+                try {
+                    job.phase = "saving";
+                    saveWorlds.call();
+                    job.phase = "scanning";
+                    long[] totals = new long[2];
+                    try (SecureFileRoot.Directory root = files.directory("")) {
+                        scanTree(root.stream, "", totals, new int[]{0});
+                    }
+                    job.totalBytes = totals[0];
+                    job.totalFiles = totals[1];
+                    job.phase = "archiving";
+                    job.backup = createArchive(job);
+                    job.phase = "completed";
+                } catch (Exception failure) {
+                    job.error = failure.getMessage() == null ? "Backup failed" : failure.getMessage();
+                    job.phase = "failed";
+                } finally {
+                    job.finishedAt = clock.millis();
+                    running.set(false);
+                }
+            });
+        } catch (RuntimeException rejected) {
+            recentJobs.remove(job.id);
+            running.set(false);
+            throw rejected;
+        }
+        return job.snapshot();
+    }
+
+    public BackupJob job(String id) {
+        Job found = recentJobs.get(id);
+        if (found == null) throw new IllegalArgumentException("Unknown backup job");
+        return found.snapshot();
+    }
+
+    public BackupJob latestJob() {
+        return recentJobs.values().stream()
+                .max(Comparator.comparingLong(value -> value.startedAt))
+                .map(Job::snapshot).orElse(null);
+    }
+
+    private Backup createArchive(Job progress) throws IOException {
         try (SecureFileRoot.Directory backups = files.directory(directory)) {
             String filename = "backup-" + NAME.format(clock.instant()) + ".zip";
             Path destination = Path.of(filename);
@@ -78,7 +148,7 @@ public final class PanelBackups implements AutoCloseable {
             try {
                 try (temporary; ZipOutputStream output = new ZipOutputStream(Channels.newOutputStream(temporary.channel()));
                      SecureFileRoot.Directory sourceRoot = files.directory("")) {
-                    backupTree(sourceRoot.stream, "", output, new long[]{0}, new int[]{0});
+                    backupTree(sourceRoot.stream, "", output, new long[]{0}, new int[]{0}, progress);
                 }
                 backups.stream.move(temporary.name(), backups.stream, destination);
             } finally {
@@ -88,13 +158,36 @@ public final class PanelBackups implements AutoCloseable {
             }
             BasicFileAttributes made = files.attributes(backups.stream, destination);
             return new Backup(filename, made.size(), made.lastModifiedTime().toMillis());
-        } finally {
-            running.unlock();
+        }
+    }
+
+    private void scanTree(SecureDirectoryStream<Path> current, String prefix,
+                          long[] totals, int[] count) throws IOException {
+        for (Path listed : current) {
+            Path name = listed.getFileName();
+            String relative = prefix.isEmpty() ? name.toString() : prefix + "/" + name;
+            if (relative.equals(directory) || name.toString().equals("session.lock")) continue;
+            try { PathGuard.segments(relative); }
+            catch (IllegalArgumentException unsafeName) {
+                throw new IOException("Backup source contains an unsafe file name", unsafeName);
+            }
+            BasicFileAttributes attributes = files.attributesOrNull(current, name);
+            if (attributes == null || attributes.isSymbolicLink()) continue;
+            if (++count[0] > MAX_ENTRIES) throw new IOException("Too many files for one backup");
+            if (attributes.isDirectory()) {
+                try (SecureDirectoryStream<Path> child = current.newDirectoryStream(name, LinkOption.NOFOLLOW_LINKS)) {
+                    scanTree(child, relative, totals, count);
+                }
+            } else if (attributes.isRegularFile()) {
+                if (attributes.size() > MAX_BYTES - totals[0]) throw new IOException("Backup exceeded the 20 GiB limit");
+                totals[0] += attributes.size();
+                totals[1]++;
+            }
         }
     }
 
     private void backupTree(SecureDirectoryStream<Path> current, String prefix, ZipOutputStream zip,
-                            long[] total, int[] count) throws IOException {
+                            long[] total, int[] count, Job progress) throws IOException {
         for (Path listed : current) {
             Path name = listed.getFileName();
             String relative = prefix.isEmpty() ? name.toString() : prefix + "/" + name;
@@ -110,7 +203,7 @@ public final class PanelBackups implements AutoCloseable {
                 zip.putNextEntry(new ZipEntry(relative + "/"));
                 zip.closeEntry();
                 try (SecureDirectoryStream<Path> child = current.newDirectoryStream(name, LinkOption.NOFOLLOW_LINKS)) {
-                    backupTree(child, relative, zip, total, count);
+                    backupTree(child, relative, zip, total, count, progress);
                 }
             } else if (attributes.isRegularFile()) {
                 if (attributes.size() > MAX_BYTES - total[0]) throw new IOException("Backup exceeded the 20 GiB limit");
@@ -123,9 +216,11 @@ public final class PanelBackups implements AutoCloseable {
                         if (read > MAX_BYTES - total[0]) throw new IOException("Backup exceeded the 20 GiB limit");
                         zip.write(buffer, 0, read);
                         total[0] += read;
+                        if (progress != null) progress.bytesDone = total[0];
                     }
                 }
                 zip.closeEntry();
+                if (progress != null) progress.filesDone++;
             }
         }
     }
@@ -152,6 +247,33 @@ public final class PanelBackups implements AutoCloseable {
         return name != null && name.matches("backup-[0-9]{8}-[0-9]{6}\\.zip");
     }
 
-    @Override public void close() throws IOException { files.close(); }
+    @Override public void close() throws IOException {
+        jobs.shutdownNow();
+        try { jobs.awaitTermination(5, TimeUnit.SECONDS); }
+        catch (InterruptedException interrupted) { Thread.currentThread().interrupt(); }
+        files.close();
+    }
     public record Backup(String name, long size, long createdAt) { }
+    public record BackupJob(String id, String phase, long startedAt, long finishedAt,
+                            long totalBytes, long bytesDone, long totalFiles, long filesDone,
+                            Backup backup, String error) { }
+
+    private static final class Job {
+        private final String id;
+        private final long startedAt;
+        private volatile String phase = "queued";
+        private volatile long finishedAt, totalBytes, bytesDone, totalFiles, filesDone;
+        private volatile Backup backup;
+        private volatile String error;
+
+        private Job(String id, long startedAt) {
+            this.id = id;
+            this.startedAt = startedAt;
+        }
+
+        private BackupJob snapshot() {
+            return new BackupJob(id, phase, startedAt, finishedAt,
+                    totalBytes, bytesDone, totalFiles, filesDone, backup, error);
+        }
+    }
 }

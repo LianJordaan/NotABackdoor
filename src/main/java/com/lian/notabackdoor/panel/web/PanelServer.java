@@ -3,10 +3,12 @@ package com.lian.notabackdoor.panel.web;
 import com.google.gson.Gson;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
+import com.google.gson.JsonArray;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
 import com.lian.notabackdoor.panel.files.PanelFiles;
 import com.lian.notabackdoor.panel.files.PanelBackups;
+import com.lian.notabackdoor.panel.files.MinecraftConsole;
 import com.lian.notabackdoor.panel.files.SecureFileRoot;
 import com.lian.notabackdoor.panel.security.AuthService;
 import org.bukkit.Bukkit;
@@ -19,6 +21,7 @@ import java.net.InetSocketAddress;
 import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
 import java.util.LinkedHashMap;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -39,6 +42,8 @@ public final class PanelServer implements AutoCloseable {
     private final HttpServer server;
     private final ExecutorService workers;
     private final PanelLog logs;
+    private final MinecraftConsole console;
+    private final PanelMetrics metrics;
     private final PanelAccess access;
     private final SetupProbeService setupProbes;
 
@@ -73,12 +78,15 @@ public final class PanelServer implements AutoCloseable {
             return thread;
         });
         this.logs = new PanelLog();
+        this.console = new MinecraftConsole(files.root());
+        this.metrics = new PanelMetrics(plugin.getDataFolder().toPath());
         server.setExecutor(workers);
         server.createContext("/", this::handle);
     }
 
     public void start() {
         server.start();
+        metrics.start(plugin);
     }
 
     public SetupProbeService setupProbes() {
@@ -89,6 +97,8 @@ public final class PanelServer implements AutoCloseable {
     public void close() {
         server.stop(1);
         logs.close();
+        metrics.close();
+        try { console.close(); } catch (IOException error) { plugin.getLogger().warning("Could not close console log handles: " + error.getMessage()); }
         workers.shutdownNow();
         try { backups.close(); } catch (IOException error) { plugin.getLogger().warning("Could not close backup handles: " + error.getMessage()); }
         try { files.close(); } catch (IOException error) { plugin.getLogger().warning("Could not close file handles: " + error.getMessage()); }
@@ -238,6 +248,24 @@ public final class PanelServer implements AutoCloseable {
             json(exchange, 201, Map.of("ok", true));
         } else if (path.equals("/api/download") && method.equals("GET")) {
             download(exchange, files.download(query(exchange, "path", "")));
+        } else if (path.equals("/api/files/tar") && method.equals("POST")) {
+            try (PanelFiles.DownloadArchive archive = files.tar(paths(body(exchange)))) {
+                exchange.getResponseHeaders().set("Content-Type", "application/x-tar");
+                exchange.getResponseHeaders().set("Content-Disposition", "attachment; filename=\"" + archive.name() + "\"");
+                exchange.sendResponseHeaders(200, archive.size());
+                archive.input().transferTo(exchange.getResponseBody());
+            }
+        } else if (path.equals("/api/files/zip") && method.equals("POST")) {
+            JsonObject body = body(exchange);
+            files.zip(paths(body), required(body, "archive", 1024));
+            json(exchange, 201, Map.of("ok", true));
+        } else if (path.equals("/api/files/bulk") && method.equals("DELETE")) {
+            JsonObject body = body(exchange);
+            List<String> selected = paths(body);
+            List<String> confirmed = paths(body, "confirmPaths");
+            if (!selected.equals(confirmed)) throw new IllegalArgumentException("Confirm the exact selection before deleting");
+            files.deleteMany(selected);
+            json(exchange, 200, Map.of("ok", true, "deleted", selected.size()));
         } else if (path.equals("/api/zip") && method.equals("POST")) {
             JsonObject body = body(exchange);
             files.zip(required(body, "source", 1024), required(body, "archive", 1024));
@@ -248,11 +276,32 @@ public final class PanelServer implements AutoCloseable {
             json(exchange, 201, Map.of("ok", true));
         } else if (path.equals("/api/logs") && method.equals("GET")) {
             json(exchange, 200, Map.of("lines", logs.recent()));
+        } else if (path.equals("/api/console/output") && method.equals("GET")) {
+            json(exchange, 200, console.read(query(exchange, "cursor", "")));
+        } else if (path.equals("/api/metrics") && method.equals("GET")) {
+            PanelMetrics.History history = metrics.history(query(exchange, "range", "realtime"));
+            Map<String, Object> result = new LinkedHashMap<>();
+            result.put("range", history.range());
+            result.put("requestedFrom", history.requestedFrom());
+            result.put("coverageStart", history.coverageStart());
+            result.put("coverageEnd", history.coverageEnd());
+            result.put("samples", history.samples());
+            result.put("latest", metrics.latest());
+            result.put("storageError", history.storageError());
+            json(exchange, 200, result);
         } else if (path.equals("/api/backups") && method.equals("GET")) {
             json(exchange, 200, Map.of("backups", backups.list()));
         } else if (path.equals("/api/backups") && method.equals("POST")) {
-            onMain(() -> { Bukkit.getWorlds().forEach(org.bukkit.World::save); return true; });
-            json(exchange, 201, backups.create());
+            json(exchange, 202, backups.start(() -> {
+                onMain(() -> { Bukkit.getWorlds().forEach(org.bukkit.World::save); return true; }, 120);
+                return null;
+            }));
+        } else if (path.equals("/api/backups/latest") && method.equals("GET")) {
+            Map<String, Object> result = new LinkedHashMap<>();
+            result.put("job", backups.latestJob());
+            json(exchange, 200, result);
+        } else if (path.equals("/api/backups/job") && method.equals("GET")) {
+            json(exchange, 200, backups.job(query(exchange, "id", "")));
         } else if (path.equals("/api/backups/download") && method.equals("GET")) {
             download(exchange, backups.download(query(exchange, "name", "")));
         } else if (path.equals("/api/backups") && method.equals("DELETE")) {
@@ -297,7 +346,11 @@ public final class PanelServer implements AutoCloseable {
     }
 
     private <T> T onMain(java.util.concurrent.Callable<T> action) throws Exception {
-        return Bukkit.getScheduler().callSyncMethod(plugin, action).get(10, TimeUnit.SECONDS);
+        return onMain(action, 10);
+    }
+
+    private <T> T onMain(java.util.concurrent.Callable<T> action, long timeoutSeconds) throws Exception {
+        return Bukkit.getScheduler().callSyncMethod(plugin, action).get(timeoutSeconds, TimeUnit.SECONDS);
     }
 
     private void staticResource(HttpExchange exchange, String path) throws IOException {
@@ -386,6 +439,28 @@ public final class PanelServer implements AutoCloseable {
         String value = object.get(name).getAsString();
         if (value.length() > limit) throw new IllegalArgumentException(name + " is too long");
         return value;
+    }
+
+    private static List<String> paths(JsonObject object) {
+        return paths(object, "paths");
+    }
+
+    private static List<String> paths(JsonObject object, String key) {
+        if (!object.has(key) || !object.get(key).isJsonArray()) {
+            throw new IllegalArgumentException("Select files or folders first");
+        }
+        JsonArray array = object.getAsJsonArray(key);
+        if (array.isEmpty() || array.size() > 2_000) throw new IllegalArgumentException("Select between 1 and 2,000 items");
+        List<String> paths = new ArrayList<>(array.size());
+        for (var item : array) {
+            if (!item.isJsonPrimitive() || !item.getAsJsonPrimitive().isString()) {
+                throw new IllegalArgumentException("Invalid file selection");
+            }
+            String value = item.getAsString();
+            if (value.length() > 1024) throw new IllegalArgumentException("Selected path is too long");
+            paths.add(value);
+        }
+        return paths;
     }
 
     private static String query(HttpExchange exchange, String key, String fallback) {

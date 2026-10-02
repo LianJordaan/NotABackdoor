@@ -2,11 +2,15 @@
 
 ## 1.0.0-beta.4 — setup guide candidate
 
+- Replaced the console's partial logger capture with a live view of Minecraft's `logs/latest.log`, including startup output. Added incremental cursors, log rotation handling, a follow-output control, and bounded browser rendering.
+- Added overview cards for process CPU, TPS, milliseconds per tick, Java heap use, and online players. Realtime shows a scrolling 60-second window; selectable history extends to one week with persistent minute summaries.
+- Added live backup progress for world saving, source scanning, and archive copying. The archive runs in a background job so the panel remains usable while it is created.
+- Added file and folder multi-selection with ZIP creation, TAR download, and reviewed bulk delete. Archive operations remain bounded and use race-safe directory handles.
 - Added a private 27-slot `/nab` guide with panel access, setup code, browser setup, and connection checks. An operator with `notabackdoor.admin` receives a clickable reminder on joining an unconfigured server; the menu does not open automatically. `/nab status` remains available after setup.
 - On direct online-mode servers, permitted operators can share one unexpired 15-minute first-run code. On offline-mode servers and Velocity backends, code issuance and access changes remain console-only. Password resets remain console-only everywhere.
 - Added explicit public HTTP access with a warning and exact advertised `http://host:port` address, alongside the default localhost mode. Changing modes restarts only the panel listener, revokes sessions and pending setup codes, and restores the prior listener and settings if the new one fails.
 - Added versioned access settings, source-specific first-run attempt limits, exact public Host/Origin checks, and a short-lived browser connection check. The browser warns that public HTTP exposes passwords and sessions in transit; its check proves only that the browser opening its link reached the panel.
-- The unchanged beta.4 JAR passed automated live checks on Paper 1.18.2, 1.21.11, 26.2, and experimental 26.3 in direct online and offline modes. The authenticated operator walkthrough remains the publication gate; beta.3 results remain separate history.
+- The earlier setup-only beta.4 JAR passed automated live checks on Paper 1.18.2, 1.21.11, 26.2, and experimental 26.3 in direct online and offline modes. LianJordaan confirmed its authenticated operator walkthrough. The combined beta.4 JAR must pass fresh exact-JAR checks before publication; beta.3 and earlier beta.4 results remain separate history.
 
 ## 1.0.0-beta.3 — public beta release
 
