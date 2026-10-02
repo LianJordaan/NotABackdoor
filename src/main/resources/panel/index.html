@@ -56,7 +56,7 @@
           <button class="feature-card card-files" data-go="files" type="button"><span class="feature-icon">▤</span><span class="feature-overline">YOUR SERVER</span><strong>Files</strong><span>Browse, edit and organize your server files without leaving this page.</span><span class="feature-link">Open file manager ↗</span></button>
           <button class="feature-card card-console" data-go="console" type="button"><span class="feature-icon">⌘</span><span class="feature-overline">LIVE ACTIVITY</span><strong>Console</strong><span>See recent output and run a command when you need to.</span><span class="feature-link">Open console ↗</span></button>
           <button class="feature-card card-players" data-go="players" type="button"><span class="feature-icon">♙</span><span class="feature-overline">COMMUNITY</span><strong>Players</strong><span>See who's online and handle moderation from one clear view.</span><span class="feature-link">Manage players ↗</span></button>
-          <button class="feature-card card-backups" data-go="backups" type="button"><span class="feature-icon">▥</span><span class="feature-overline">PEACE OF MIND</span><strong>Backups</strong><span>Save a copy of your server and download it whenever you want.</span><span class="feature-link">View backups ↗</span></button>
+          <button class="feature-card card-backups" data-go="backups" type="button"><span class="feature-icon">▥</span><span class="feature-overline">PEACE OF MIND</span><strong>Backups</strong><span>Archive this server's files and download them later.</span><span class="feature-link">View backups ↗</span></button>
         </div>
         <div class="notice"><span class="notice-icon">ⓘ</span><div><strong id="access-heading">Working on your server from another computer?</strong><p id="access-help">For SSH access, run <code>ssh -L 8127:127.0.0.1:8127 user@your-server</code> and open <code>http://localhost:8127</code>. If your server has been paired with an HTTPS relay, its link is also available from the server console.</p></div></div>
       </section>
@@ -78,8 +78,8 @@
       </section>
 
       <section class="view" id="view-backups" hidden>
-        <div class="page-heading split"><div><p class="eyebrow">PEACE OF MIND</p><h1>Backups</h1><p>Save a copy before a big change and download it for safekeeping.</p></div><button id="create-backup" class="button primary" type="button">+ Create backup</button></div>
-        <div class="notice"><span class="notice-icon">ⓘ</span><div><strong>For a consistent world backup, stop the server first.</strong><p>Creating a backup while players are active saves worlds first, but files can change as the archive is written.</p></div></div>
+        <div class="page-heading split"><div><p class="eyebrow">PEACE OF MIND</p><h1>Backups</h1><p>Create a live archive before a big change and download it for safekeeping.</p></div><button id="create-backup" class="button primary" type="button">+ Create backup</button></div>
+        <div class="notice"><span class="notice-icon">ⓘ</span><div><strong>This panel archives the running server's process folder.</strong><p>Paper saves loaded worlds first, but files can change while the archive is written. Worlds stored outside this folder are excluded. For a strictly consistent backup, stop Paper and use your host's snapshot or backup tool.</p></div></div>
         <div class="panel"><div class="panel-header"><strong>Saved backups</strong><button id="refresh-backups" class="button subtle" type="button">Refresh</button></div><div id="backup-list" class="backup-list"></div></div>
       </section>
     </main>

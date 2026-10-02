@@ -562,7 +562,7 @@ async function loadBackups() {
 }
 
 async function createBackup() {
-  const answer = await review({title: "Create a server backup?", description: "The server will save its worlds, then archive its files. This can take a while on a large server.", confirm: "Create backup"});
+  const answer = await review({title: "Create a live server archive?", description: "Paper saves loaded worlds, then this panel archives the running server's process folder. Worlds outside that folder are excluded, and files can change during copying.", confirm: "Create backup"});
   if (!answer) return;
   const button = $("create-backup");
   setBusy(button, true, "Creating…");

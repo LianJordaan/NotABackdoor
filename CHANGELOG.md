@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.0.0-beta.3 — candidate, not published
+
+- Corrected the Backups screen and confirmation: in-panel archives are created while Paper runs and cover only the server process folder; worlds stored elsewhere are excluded.
+- Clarified that a strictly consistent full-server backup requires stopping Paper and using the host's snapshot or backup tool. This release changes the guidance, not the archive implementation.
+
 ## 1.0.0-beta.2 — candidate, not published
 
 - Added an opt-in outbound HTTPS relay connector for hosts with plugin upload and console access; the panel remains localhost-only and SSH forwarding remains available.
