@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.0.0-beta.2 — candidate, not published
+
+- Added an opt-in outbound HTTPS relay connector for hosts with plugin upload and console access; the panel remains localhost-only and SSH forwarding remains available.
+- Added console pairing, persistent reconnect and revocation, exact Host/Origin checks, Secure browser cookies, bounded streaming, and durable rate limits to the separate relay service.
+- Added four concurrent transfer slots so a backup download need not block ordinary panel requests, plus review-only least-privilege systemd and dedicated-hostname Nginx templates.
+- Kept the relay unconfigured by default. A public relay URL, DNS, certificate, deployment review, and owner authorization are still required before claiming remote access on plugin-only hosts.
+
 ## 1.0.0-beta.1 — pending release
 
 - Rebuilt the panel interface around Files, Console, Players, and Backups views.

@@ -1,0 +1,35 @@
+# Review template only. Do not install or enable without deployment approval.
+[Unit]
+Description=NotABackdoor outbound HTTPS relay
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+DynamicUser=yes
+StateDirectory=notabackdoor-relay
+StateDirectoryMode=0700
+UMask=0077
+WorkingDirectory=/opt/notabackdoor-relay
+LoadCredential=fullchain.pem:/etc/letsencrypt/live/relay.example.org/fullchain.pem
+LoadCredential=privkey.pem:/etc/letsencrypt/live/relay.example.org/privkey.pem
+ExecStart=/opt/notabackdoor-relay/venv/bin/python /opt/notabackdoor-relay/relay/service.py --public-origin https://relay.example.org --data /var/lib/notabackdoor-relay --cert ${CREDENTIALS_DIRECTORY}/fullchain.pem --key ${CREDENTIALS_DIRECTORY}/privkey.pem --listen 127.0.0.1 --port 27443 --trusted-loopback-proxy
+Restart=on-failure
+RestartSec=3s
+NoNewPrivileges=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+CapabilityBoundingSet=
+AmbientCapabilities=
+MemoryMax=512M
+TasksMax=128
+LimitNOFILE=2048
+
+[Install]
+WantedBy=multi-user.target

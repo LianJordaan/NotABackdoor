@@ -2,7 +2,7 @@
 
 A small web panel that runs inside a Paper server. It is for server owners who need to edit a configuration, look at a log, or moderate a player without navigating a full hosting control panel.
 
-The upcoming `1.0.0-beta.1` release is a complete replacement of the old HTTP panel. It is **not released yet**. Keep using a separate server or a backup when testing it. The supported remote-access setup uses SSH port forwarding. Hosts that offer only plugin upload and a console cannot expose this panel yet.
+The `1.0.0-beta.2` candidate replaces the old HTTP panel and adds an [opt-in outbound HTTPS relay](relay/README.md). It is **not released yet**. Keep using a separate server or a backup when testing it. SSH forwarding remains the tested remote-access route; the relay is not publicly deployed yet.
 
 ![Desktop overview of the NotABackdoor panel](docs/screenshots/overview-desktop.png)
 
@@ -18,18 +18,18 @@ The upcoming `1.0.0-beta.1` release is a complete replacement of the old HTTP pa
 
 ## Install and sign in
 
-1. Use a Paper and Java combination listed in [the exact live test record](docs/TESTING.md). The beta JAR passed on Paper 1.18.2, 1.21.11, 26.2, and experimental 26.3; other versions are not yet live-tested. Copy the JAR into `plugins/` and start the server.
+1. Use a Paper and Java combination listed in [the exact live test record](docs/TESTING.md). The previous secure beta JAR passed on Paper 1.18.2, 1.21.11, 26.2, and experimental 26.3; this new relay candidate requires its own exact-JAR checks. Copy the JAR into `plugins/` and start the server.
 2. Run `nab setup` **from the server console**. This prints a one-time code that expires in 15 minutes. It is never placed in a URL.
 3. On the server itself, open `http://127.0.0.1:8127`. From another computer, run `ssh -L 8127:127.0.0.1:8127 user@your-server` and open `http://localhost:8127` locally.
 4. Enter the setup code and choose a password of at least 12 characters. Sign in to the panel.
 
-The panel listens only on `127.0.0.1`. It intentionally refuses a public bind address. No separate web service, database, or proxy is needed; remote access uses the server's existing SSH connection. Change `panel.port` in `plugins/NotABackdoor/config.yml` if 8127 is in use.
+The panel listens only on `127.0.0.1`. It intentionally refuses a public bind address. SSH access needs no additional service. The optional relay uses a separately operated HTTPS service and a dedicated hostname; it is disabled until paired. Change `panel.port` in `plugins/NotABackdoor/config.yml` if 8127 is in use.
 
 The file manager and backups require a Java filesystem provider with `SecureDirectoryStream`, which keeps operations bound to open directory handles during symlink swaps. If the provider lacks it, the plugin refuses to start and logs `This filesystem has no race-safe directory handles; panel file access is disabled`. The tested Linux filesystem supports it; the default Windows JDK provider does not. The exact secure-file candidate passed the [pinned live checks](docs/TESTING.md#secure-file-100-beta1-candidate).
 
 On Paper 1.21.11, a scripted offline-mode Minecraft client also verified that panel operator, console, whitelist, and ban actions affect a connected player and subsequent joins. The [test record](docs/TESTING.md#real-client-panel-probe) distinguishes this 30/30 end-to-end result from the four-version panel API checks. A Microsoft-authenticated player login has not been tested.
 
-If your host does not provide SSH access, you cannot use the documented remote-access setup on that host yet. A custom HTTPS reverse proxy needs its own access controls and must rewrite the upstream `Host` and `Origin` headers to the allowed localhost address; it is not an automatic setup option. Opening a public HTTP port is not a supported shortcut.
+If your host does not provide SSH access, the [outbound relay candidate](relay/README.md) offers a one-time console pairing link after a relay operator deploys a dedicated HTTPS origin. Set `relay.origin` in the plugin config, run `nab relay pair`, then open the link and enter the separate console code. It is not publicly deployed, so this is not yet an available setup option. Opening a public HTTP port is not a supported shortcut.
 
 If you forget your password, run `nab setup` again in the server console and set a new one. This revokes existing sessions. The password is stored as a salted PBKDF2-HMAC-SHA256 hash in `plugins/NotABackdoor/auth.properties`. Keep that file and your SSH account private.
 
@@ -47,6 +47,6 @@ File paths stay under the server process directory, including `plugins/` and `se
 
 ## Development
 
-Build with `mvn package`; run checks with `mvn test`. The shaded production JAR is `target/NotABackdoor-1.0.0-beta.1.jar`. Java sources target 17; the API baseline is Paper 1.18.2. Browser assets live in `src/main/resources/panel/`, separate from the HTTP, file, authentication, and backup services.
+Build with `mvn package`; run checks with `mvn test`. The shaded candidate JAR is `target/NotABackdoor-1.0.0-beta.2.jar`. Java sources target 17; the API baseline is Paper 1.18.2. Browser assets live in `src/main/resources/panel/`, separate from the HTTP, file, authentication, backup, and relay services.
 
 The old implementation and pages were removed because several file endpoints could escape the intended directory and one handler ignored an authentication return value. The replacement has no route to those handlers.

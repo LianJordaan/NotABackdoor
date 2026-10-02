@@ -1,6 +1,7 @@
 package com.lian.notabackdoor.panel;
 
 import com.lian.notabackdoor.panel.files.PanelFiles;
+import com.lian.notabackdoor.panel.relay.RelayClient;
 import com.lian.notabackdoor.panel.security.AuthService;
 import com.lian.notabackdoor.panel.web.PanelServer;
 import org.bukkit.command.Command;
@@ -18,6 +19,7 @@ import java.time.Instant;
 public final class NotABackdoorPlugin extends JavaPlugin {
     private AuthService auth;
     private PanelServer panel;
+    private RelayClient relay;
 
     @Override
     public void onEnable() {
@@ -53,6 +55,13 @@ public final class NotABackdoorPlugin extends JavaPlugin {
             if (!auth.isConfigured()) {
                 getLogger().info("Run 'nab setup' from the server console to create the first panel password.");
             }
+            try {
+                relay = new RelayClient(data, port, getLogger());
+                getLogger().info("Optional HTTPS relay: " + relay.status());
+            } catch (IOException relayFailure) {
+                getLogger().warning("Optional relay state could not load; local panel and SSH access remain available: "
+                        + relayFailure.getMessage());
+            }
         } catch (Exception failure) {
             getLogger().severe("Panel startup failed safely: " + failure.getMessage());
             getServer().getPluginManager().disablePlugin(this);
@@ -61,6 +70,10 @@ public final class NotABackdoorPlugin extends JavaPlugin {
 
     @Override
     public void onDisable() {
+        if (relay != null) {
+            relay.close();
+            relay = null;
+        }
         if (panel != null) {
             panel.close();
             panel = null;
@@ -78,12 +91,59 @@ public final class NotABackdoorPlugin extends JavaPlugin {
                 sender.sendMessage("The panel is not running.");
             } else {
                 sender.sendMessage("One-time panel setup code (15 minutes): " + auth.issueSetupCode());
-                sender.sendMessage("Open http://127.0.0.1:" + getConfig().getInt("panel.port", 8127)
-                        + "/ through an SSH tunnel and enter this code on the setup screen.");
+                sender.sendMessage("Enter this code on the local panel through SSH or your paired HTTPS relay link.");
             }
             return true;
         }
-        sender.sendMessage("Usage: nab setup (server console only)");
+        if (args.length >= 2 && "relay".equalsIgnoreCase(args[0])) {
+            if (relay == null) {
+                sender.sendMessage("The optional relay could not load. The local panel still works through SSH.");
+                return true;
+            }
+            if (args.length == 2 && "status".equalsIgnoreCase(args[1])) {
+                sender.sendMessage(relay.status());
+                return true;
+            }
+            if (args.length == 2 && "revoke".equalsIgnoreCase(args[1])) {
+                try {
+                    sender.sendMessage(relay.revoke());
+                } catch (IOException failure) {
+                    sender.sendMessage("Could not queue relay revocation. Check the local relay state file and retry.");
+                }
+                return true;
+            }
+            if ((args.length == 2 || args.length == 3) && "pair".equalsIgnoreCase(args[1])) {
+                String relayOrigin = args.length == 3 ? args[2]
+                        : getConfig().getString("relay.origin", "").trim();
+                if (relayOrigin.isBlank()) {
+                    sender.sendMessage("No relay address is configured. Set relay.origin or use 'nab relay pair <https-origin>'.");
+                    return true;
+                }
+                getServer().getScheduler().runTaskAsynchronously(this, () -> {
+                    String[] lines;
+                    try {
+                        RelayClient.Pairing pairing = relay.pair(relayOrigin);
+                        lines = new String[]{
+                                "Open this one-time HTTPS pairing link: " + pairing.url(),
+                                "Enter this separate console pairing code: " + pairing.code(),
+                                "The link expires at " + pairing.expiresAt() + ".",
+                                auth.isConfigured()
+                                        ? "After pairing, sign in with your existing panel password."
+                                        : "After pairing, run 'nab setup' here for the panel password setup code."
+                        };
+                    } catch (Exception failure) {
+                        lines = new String[]{"Relay pairing failed: " + failure.getMessage()
+                                + ". Local access through SSH still works."};
+                    }
+                    String[] resultLines = lines;
+                    getServer().getScheduler().runTask(this, () -> {
+                        for (String line : resultLines) sender.sendMessage(line);
+                    });
+                });
+                return true;
+            }
+        }
+        sender.sendMessage("Usage: nab setup | nab relay pair [https-origin] | nab relay status | nab relay revoke (console only)");
         return true;
     }
 

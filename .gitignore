@@ -111,3 +111,12 @@ buildNumber.properties
 
 # Common working directory
 run/
+
+# Local relay runtime state and Python caches
+__pycache__/
+*.py[cod]
+relay-data/
+relay/*.sqlite3*
+relay/route-signing.key
+relay/*.pem
+relay/*.p12

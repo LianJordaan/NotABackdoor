@@ -5,3 +5,8 @@ config-version: 2
 panel:
   bind: "127.0.0.1"
   port: 8127
+
+# Set only after a dedicated HTTPS relay origin has been approved and deployed.
+# Then `nab relay pair` needs no URL argument.
+relay:
+  origin: ""

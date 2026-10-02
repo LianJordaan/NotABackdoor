@@ -13,6 +13,13 @@ const state = {
   editorRevision: 0,
 };
 
+if (window.location.protocol === "https:") {
+  document.querySelector(".server-pill small").textContent = "HTTPS connection";
+  $("access-heading").textContent = "Connected over HTTPS";
+  $("access-help").textContent = `This panel is open at ${window.location.origin}. Run nab relay status in the server console to check its pairing. An SSH tunnel remains available as a local fallback.`;
+  $("access-footnote").textContent = "Your HTTPS relay operator can observe panel traffic. Keep your panel password private.";
+}
+
 function node(tag, className, content) {
   const element = document.createElement(tag);
   if (className) element.className = className;
@@ -50,7 +57,7 @@ async function request(path, options = {}) {
   try {
     response = await fetch(path, {method, headers, body, credentials: "same-origin", cache: "no-store"});
   } catch {
-    throw new Error("Could not reach the panel. Check the server or SSH tunnel and try again.");
+    throw new Error("Could not reach the panel. Check the server connection and try again.");
   }
   const result = await response.json().catch(() => ({}));
   if (!response.ok) {
@@ -438,7 +445,7 @@ async function download(url, filename) {
     response = await fetch(url, {headers: {Accept: "application/octet-stream"},
       credentials: "same-origin", cache: "no-store"});
   } catch {
-    throw new Error("Could not reach the panel. Check the server or SSH tunnel and try again.");
+    throw new Error("Could not reach the panel. Check the server connection and try again.");
   }
   if (!response.ok) {
     const result = await response.json().catch(() => ({}));
