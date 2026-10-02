@@ -17,7 +17,7 @@ This JAR keeps the console, metrics, backup progress, bulk file actions, and in-
 | 26.2 | 129 | 25 | Pass | Pass |
 | 26.3 (experimental) | 140 | 25 | Pass | Pass |
 
-On Linux ext4 with Java 17, all **47 Maven tests passed with none skipped**. Node's syntax check passed against `panel/app.js` inside this exact JAR. A browser visual review is not independently verified in this environment. A fresh authenticated LianJordaan operator walkthrough against this hash remains the release gate; the earlier combined candidate's passing tests and user confirmation do not transfer. Paper 26.3 is experimental.
+On Linux ext4 with Java 17, all **47 Maven tests passed with none skipped**. Node's syntax check passed against `panel/app.js` inside this exact JAR. LianJordaan reported on 2026-10-02 that the final candidate's direct online-mode setup walkthrough, Console Reload, and backup all worked. This is a user-confirmed manual result for the current hash, separate from the automated matrix and from confirmation of the earlier combined JAR. The automated matrix did not observe the browser interface or authenticate a Minecraft client; a browser visual review is not independently verified in this environment. Paper 26.3 is experimental.
 
 ## Historical combined panel and setup 1.0.0-beta.4 candidate
 
