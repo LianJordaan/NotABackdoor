@@ -11,13 +11,30 @@ const state = {
   filesRequest: 0,
   editorRequest: 0,
   editorRevision: 0,
+  setupCheckNonce: null,
 };
 
+// The setup-check token stays in the URL fragment, never in an HTTP request URL.
+// Remove it from the address bar before making any other request.
+const setupCheckParams = new URLSearchParams(window.location.hash.slice(1));
+const setupCheckValue = setupCheckParams.get("nab-check");
+if (setupCheckValue !== null) {
+  window.history.replaceState(null, "", window.location.pathname + window.location.search);
+  if (/^[A-Za-z0-9_-]{16,128}$/.test(setupCheckValue)) state.setupCheckNonce = setupCheckValue;
+}
+
 if (window.location.protocol === "https:") {
+  $("transport-warning").hidden = true;
   document.querySelector(".server-pill small").textContent = "HTTPS connection";
   $("access-heading").textContent = "Connected over HTTPS";
   $("access-help").textContent = `This panel is open at ${window.location.origin}. Run nab relay status in the server console to check its pairing. An SSH tunnel remains available as a local fallback.`;
   $("access-footnote").textContent = "Your HTTPS relay operator can observe panel traffic. Keep your panel password private.";
+} else {
+  document.querySelector(".server-pill small").textContent = "HTTP connection · unencrypted";
+  if (!["localhost", "127.0.0.1", "::1", "[::1]"].includes(window.location.hostname)) {
+    $("access-heading").textContent = "This public HTTP connection is unencrypted";
+    $("access-help").textContent = "Passwords, session cookies and commands can be read by anyone on the network path. For private access, use an SSH tunnel instead.";
+  }
 }
 
 function node(tag, className, content) {
@@ -61,13 +78,21 @@ async function request(path, options = {}) {
   }
   const result = await response.json().catch(() => ({}));
   if (!response.ok) {
-    if (response.status === 401 && !["/api/login", "/api/session"].includes(path)) {
+    if (response.status === 401 && !["/api/login", "/api/session", "/api/setup-check"].includes(path)) {
       state.csrf = null;
       showAuth(true);
     }
     throw new Error(result.error || `Request failed (${response.status})`);
   }
   return result;
+}
+
+async function reportSetupCheck(step) {
+  if (!state.setupCheckNonce) return;
+  await request("/api/setup-check", {
+    method: "POST", body: {nonce: state.setupCheckNonce, step},
+  });
+  if (step === "login") state.setupCheckNonce = null;
 }
 
 function showAuth(configured) {
@@ -85,6 +110,10 @@ function showApp() {
 }
 
 async function boot() {
+  if (state.setupCheckNonce) {
+    try { await reportSetupCheck("reach"); }
+    catch (error) { fail(error); }
+  }
   try {
     const status = await request("/api/status");
     if (!status.configured) { showAuth(false); return; }
@@ -92,6 +121,10 @@ async function boot() {
       const session = await request("/api/session");
       state.csrf = session.csrf;
       showApp();
+      if (state.setupCheckNonce) {
+        try { await reportSetupCheck("login"); }
+        catch (error) { fail(error); }
+      }
     } catch (error) {
       showAuth(true);
       if (!String(error.message).includes("Sign in")) fail(error);
@@ -610,6 +643,10 @@ listen("login-form", "submit", async event => {
     state.csrf = login.csrf;
     form.reset();
     showApp();
+    if (state.setupCheckNonce) {
+      try { await reportSetupCheck("login"); }
+      catch (error) { fail(error); }
+    }
   } finally { setBusy(button, false); }
 });
 

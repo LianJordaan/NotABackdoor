@@ -15,27 +15,28 @@
       <div class="eyebrow"><span class="status-dot"></span> YOUR SERVER, IN REACH</div>
       <h1>Welcome to <em>NotABackdoor.</em></h1>
       <p class="auth-intro">A calm place to handle the things that usually mean opening five different tools.</p>
+      <div id="transport-warning" class="notice" role="note"><span class="notice-icon" aria-hidden="true">!</span><div><strong>Plain HTTP is not encrypted.</strong><p>On a public HTTP connection, people on the network path can read your password and session. Use localhost or an SSH tunnel when possible.</p></div></div>
       <form id="setup-form" class="auth-form" hidden>
-        <h2>Secure your panel</h2>
-        <p>Run <code>nab setup</code> in your server console. Enter the one-time code below, then choose a password with at least 12 characters.</p>
+        <h2>Set a panel password</h2>
+        <p>On an online-mode server, an operator can get the one-time code with <code>/nab</code>. Otherwise run <code>nab setup</code> in the server console. Enter that code below, then choose a password with at least 12 characters.</p>
         <label>One-time setup code<input name="code" autocomplete="off" spellcheck="false" required></label>
         <label>New password<input name="password" type="password" autocomplete="new-password" minlength="12" required></label>
         <button class="button primary" type="submit">Create password <span aria-hidden="true">↗</span></button>
       </form>
       <form id="login-form" class="auth-form" hidden>
         <h2>Sign in</h2>
-        <p>Use the password you set from the server console.</p>
+        <p>Use the password you created during setup.</p>
         <label>Panel password<input name="password" type="password" autocomplete="current-password" required></label>
         <button class="button primary" type="submit">Open panel <span aria-hidden="true">↗</span></button>
       </form>
-      <p id="access-footnote" class="auth-footnote">This page is available through localhost, an SSH tunnel, or a paired HTTPS relay.</p>
+      <p id="access-footnote" class="auth-footnote">For access from another computer, use an SSH tunnel or explicitly configure public HTTP from the server. Public HTTP does not encrypt traffic.</p>
     </div>
   </div>
 
   <div id="app-view" class="app-shell" hidden>
     <aside class="sidebar">
       <div class="brand"><span class="brand-mark">N<span>·</span>B</span><span><strong>NotABackdoor</strong><small>SERVER PANEL</small></span></div>
-      <div class="server-pill"><span class="status-dot"></span><span><strong>Connected</strong><small>Local secure session</small></span></div>
+      <div class="server-pill"><span class="status-dot"></span><span><strong>Connected</strong><small>HTTP session</small></span></div>
       <div class="nav-label">WORKSPACE</div>
       <nav aria-label="Main navigation">
         <button class="nav-item active" data-view="overview" type="button"><span class="nav-icon">◫</span> Overview</button>

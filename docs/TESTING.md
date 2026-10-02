@@ -1,5 +1,15 @@
 # NotABackdoor exact-JAR test record
 
+## Guided setup 1.0.0-beta.4 candidate
+
+Beta.4 adds an operator setup guide and an opt-in public HTTP listener. The beta.3 hash and results below remain historical; they do **not** qualify the changed beta.4 JAR. Record the frozen beta.4 SHA-512, source revision, Paper build, Java runtime, individual outcomes, and server logs in the parent workspace before claiming compatibility or publishing.
+
+Run automated authentication, menu, configuration, HTTP, browser, and restart checks first. In particular, verify that two permitted operators receive the same unexpired 15-minute first-run code; five invalid setup attempts from one source do not invalidate another source's valid code; only the console can reset an existing password; offline-mode operators cannot issue codes or change access; and loss of OP or `notabackdoor.admin` permission blocks commands and menu clicks. Test shift-click, drag, number-key, double-click, and bottom-inventory interactions while the guide is open.
+
+Check default localhost access, exact public Host/Origin acceptance and rejection, public HTTP warning copy, mode-change session/code revocation, v2-to-v3 migration with `config.yml.v2.bak` created on first beta.4 startup, password preservation, restart persistence, and rollback when a replacement listener cannot bind. Verify that the console rejects `nab access public http://host:port` without the trailing `confirm`, and accepts `nab access public http://host:port confirm` only after explicit entry. The connection check has two parts: local HTTP health and a short-lived browser link that reports a page visit and authenticated sign-in. A passing browser round trip proves only that the browser opening that link reached this panel, not that every external network can reach it. Public HTTP does not encrypt credentials or sessions.
+
+Freeze one beta.4 JAR and rerun its panel and server checks on Paper 1.18.2 build 388 (Java 17), 1.21.11 build 132 (Java 21), 26.2 build 129 (Java 25), and experimental 26.3 build 140 (Java 25). Use isolated worlds and stop the servers afterward. Separately, have **LianJordaan** join a direct `online-mode=true` test server with Microsoft authentication, receive the private reminder, open `/nab`, complete the code/browser walkthrough, and confirm the connection result. A scripted online-mode panel API check alone cannot prove authenticated player login or OP interaction. Only version/build/mode combinations that pass against the unchanged final hash may be listed in the beta.4 release.
+
 ## Backup copy 1.0.0-beta.3 candidate
 
 The frozen JAR is `testing/notabackdoor/candidates/NotABackdoor-beta.3-028a29cf5470.jar` in the parent workspace, built from source commit `68f51732215a2d5725c0766f552fab84f7bc30ca`. Its SHA-512 is:

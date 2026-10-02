@@ -12,6 +12,7 @@ import java.time.Instant;
 import java.time.ZoneId;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -74,6 +75,53 @@ class AuthServiceTest {
         assertNotNull(service.login("a long test password".toCharArray(), "192.0.2.2"));
         clock.advance(Duration.ofMinutes(16));
         assertNotNull(service.login("a long test password".toCharArray(), "192.0.2.1"));
+    }
+
+    @Test
+    void firstRunCodeIsSharedUntilExpiryButUnavailableAfterSetup() throws IOException {
+        MutableClock clock = new MutableClock();
+        AuthService service = new AuthService(directory, clock, 1_000);
+        AuthService.FirstRunCode first = service.firstRunCode();
+        assertNotNull(first);
+        clock.advance(Duration.ofMinutes(14));
+        assertEquals(first, service.firstRunCode());
+        clock.advance(Duration.ofMinutes(2));
+        AuthService.FirstRunCode replacement = service.firstRunCode();
+        assertFalse(first.value().equals(replacement.value()));
+        assertThrows(SecurityException.class, () -> service.setPassword(first.value(), "a long test password".toCharArray(), "192.0.2.1"));
+        service.setPassword(replacement.value(), "a long test password".toCharArray(), "192.0.2.2");
+        assertNull(service.firstRunCode());
+        assertNotNull(service.issueSetupCode()); // Console-only password reset remains available.
+    }
+
+    @Test
+    void setupFailuresArePerAddressAndDoNotInvalidateAnotherOperatorsCode() throws IOException {
+        MutableClock clock = new MutableClock();
+        AuthService service = new AuthService(directory, clock, 1_000);
+        String code = service.firstRunCode().value();
+        for (int attempt = 0; attempt < 5; attempt++) {
+            assertThrows(SecurityException.class, () -> service.setPassword("wrong", "a long test password".toCharArray(), "192.0.2.1"));
+        }
+        assertThrows(SecurityException.class, () -> service.setPassword(code, "a long test password".toCharArray(), "192.0.2.1"));
+        assertEquals(code, service.firstRunCode().value());
+        service.setPassword(code, "a long test password".toCharArray(), "192.0.2.2");
+        assertTrue(service.isConfigured());
+    }
+
+    @Test
+    void networkRebindRevokesSessionsAndPendingSetupCodes() throws IOException {
+        MutableClock clock = new MutableClock();
+        AuthService service = new AuthService(directory, clock, 1_000);
+        String firstCode = service.firstRunCode().value();
+        service.revokeSetupCode();
+        assertThrows(SecurityException.class, () -> service.setPassword(firstCode, "a long test password".toCharArray(), "192.0.2.1"));
+        service.setPassword(service.firstRunCode().value(), "a long test password".toCharArray(), "192.0.2.1");
+        AuthService.Login login = service.login("a long test password".toCharArray(), "192.0.2.1");
+        assertNotNull(login);
+        assertEquals(clock.instant(), service.lastSuccessfulLoginAt());
+        assertNotNull(service.authenticate(login.token()));
+        service.revokeSessions();
+        assertNull(service.authenticate(login.token()));
     }
 
     private static final class MutableClock extends Clock {

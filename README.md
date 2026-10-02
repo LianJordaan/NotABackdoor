@@ -2,7 +2,7 @@
 
 A small web panel that runs inside a Paper server. It is for server owners who need to edit a configuration, look at a log, or moderate a player without navigating a full hosting control panel.
 
-The publicly listed `1.0.0-beta.3` release replaces the old public HTTP panel with a localhost HTTP panel and an improved browser interface. Keep using a separate server or a host backup when testing this beta. Local panel and SSH-forwarded access passed live checks. An [experimental outbound relay connector](relay/README.md) is packaged but is not part of the supported setup for this release.
+The publicly listed `1.0.0-beta.3` release provides the localhost panel and improved browser interface. The `1.0.0-beta.4` candidate adds a private in-game setup guide and an explicitly enabled public HTTP mode. Keep using a separate server or a host backup while testing the new candidate. The [experimental outbound relay connector](relay/README.md) is not part of its supported setup.
 
 ![Desktop overview of the NotABackdoor panel](docs/screenshots/overview-desktop.png)
 
@@ -16,37 +16,38 @@ The publicly listed `1.0.0-beta.3` release replaces the old public HTTP panel wi
 - See online players and manage operator, ban, and whitelist state by exact player name.
 - Create, download, or delete a live archive of the server process folder. The plugin saves loaded worlds first and omits Minecraft's live `session.lock` files. Files may change during copying, and world folders outside the process folder are excluded. For a strictly consistent full-server backup, stop Paper and use your host's snapshot or backup tool; the in-panel archive requires the plugin to be running.
 
-## Install and sign in
+## Set up beta.4
 
-1. Use a Paper and Java combination listed in [the exact live test record](docs/TESTING.md). This beta.3 JAR passed on Paper 1.18.2, 1.21.11, 26.2, and experimental 26.3. Copy the JAR into `plugins/` and start the server.
-2. Run `nab setup` **from the server console**. This prints a one-time code that expires in 15 minutes. It is never placed in a URL.
-3. On the server itself, open `http://127.0.0.1:8127`. From another computer, run `ssh -L 8127:127.0.0.1:8127 user@your-server` and open `http://localhost:8127` locally.
-4. Enter the setup code and choose a password of at least 12 characters. Sign in to the panel.
+1. Copy the JAR into `plugins/` and start Paper. Use a compatible Paper and Java combination from the [exact-JAR test record](docs/TESTING.md); beta.3 results do not establish beta.4 compatibility.
+2. On a direct `online-mode=true` server, an OP with `notabackdoor.admin` receives a private reminder when joining an unconfigured server. Run `/nab` to open the 27-slot guide. It shows panel access, setup code, browser setup, and connection check. It does not open automatically. `/nab status` gives the same diagnostic summary in chat.
+3. Choose panel access. The default is local HTTP at `http://127.0.0.1:8127`. From another computer, run `ssh -L 8127:127.0.0.1:8127 user@your-server`, then open `http://localhost:8127` locally. Public HTTP requires a separate in-game warning and confirmation, followed by an exact `http://host:port` address. The server console can instead run `nab access local` or `nab access public http://host:port confirm`; the final `confirm` is required to avoid accidental exposure. The public URL's port becomes the panel listener port.
+4. In the guide, select **Setup code**. The copyable first-run code lasts 15 minutes. Multiple eligible operators see the same unexpired code, so asking again does not invalidate another operator's setup. On `online-mode=false` servers, including Velocity backends, only the server console may change access or issue the code: run `nab setup`. The in-game guide still shows status and diagnostics.
+5. Open the panel address and enter the code with a new password of 12–128 characters. Do not enter the password in Minecraft chat. Sign in, then use **Connection check** in `/nab`: it checks the local listener and offers a short-lived link to verify that your browser reached the panel. A successful browser sign-in completes that check.
 
-The supported panel listens only on `127.0.0.1` over HTTP. It intentionally refuses a public bind address. SSH forwarding provides encrypted remote transport without changing the panel's HTTP listener. The optional relay connector is unconfigured and unsupported in this release. Change `panel.port` in `plugins/NotABackdoor/config.yml` if 8127 is in use.
+**Public HTTP is unencrypted.** People on the network path may read panel passwords, sessions, files, and commands. It is disabled by default; use localhost or an SSH tunnel for private access. The configured public address must have an exact host and explicit port; applying it updates and saves the listener port. Public mode accepts only that Host and Origin, while preserving local health access. The browser check proves only the browser that opened its link reached the panel; it does not prove reachability from every network. Change `panel.port` in `plugins/NotABackdoor/config.yml` if 8127 is in use.
 
-The file manager and backups require a Java filesystem provider with `SecureDirectoryStream`, which keeps operations bound to open directory handles during symlink swaps. If the provider lacks it, the plugin refuses to start and logs `This filesystem has no race-safe directory handles; panel file access is disabled`. The tested Linux filesystem supports it; the default Windows JDK provider does not. The exact beta.3 candidate passed the [pinned live checks](docs/TESTING.md#backup-copy-100-beta3-candidate).
+The file manager and backups require a Java filesystem provider with `SecureDirectoryStream`, which keeps operations bound to open directory handles during symlink swaps. If the provider lacks it, the plugin refuses to start and logs `This filesystem has no race-safe directory handles; panel file access is disabled`. The tested Linux filesystem supports it; the default Windows JDK provider does not. The exact beta.3 candidate passed the [pinned live checks](docs/TESTING.md#backup-copy-100-beta3-candidate); beta.4 needs its own record.
 
 On Paper 1.21.11, a scripted offline-mode Minecraft client also verified that panel operator, console, whitelist, and ban actions affect a connected player and subsequent joins. The [beta.3 test record](docs/TESTING.md#backup-copy-100-beta3-candidate) distinguishes this 30/30 end-to-end result from the four-version panel API checks. A Microsoft-authenticated player login has not been tested.
 
-If your host does not provide SSH access, the [outbound relay candidate](relay/README.md) is still experimental and has no deployed service. It is not an available setup option for this beta. Opening a public HTTP port is not a supported shortcut.
+If your host does not provide SSH access, the [outbound relay candidate](relay/README.md) remains experimental with no deployed service. The explicit public HTTP mode is available for owners who accept its unencrypted transport. If you separately configure the experimental relay, it stays connected to the panel port selected when Paper started; restart Paper after changing that port before using the relay.
 
-If you forget your password, run `nab setup` again in the server console and set a new one. This revokes existing sessions. The password is stored as a salted PBKDF2-HMAC-SHA256 hash in `plugins/NotABackdoor/auth.properties`. Keep that file and your SSH account private.
+After a password exists, an in-game operator cannot issue another setup code. If you forget the password, run `nab setup` in the server console and set a new one. This revokes existing sessions. Changing the panel access mode also revokes sessions and any pending setup code; request a fresh code if setup was still in progress. The password is stored as a salted PBKDF2-HMAC-SHA256 hash in `plugins/NotABackdoor/auth.properties`. Keep that file and your SSH account private.
 
 ### Upgrade from the old panel
 
-The first start copies an old `config.yml` to a timestamped `.legacy-*.bak` file and writes a safe v2 configuration. Review that backup privately, then remove it when you no longer need it. Old public HTTP, password-in-URL, and `clearFiles` settings are ignored. The plugin does not delete server files on startup.
+The first start with a pre-v2 configuration copies the old `config.yml` to a timestamped `.legacy-*.bak` file and writes a safe configuration. Old public HTTP, password-in-URL, and `clearFiles` settings are ignored. On the first beta.4 startup, an existing v2 configuration is backed up as `config.yml.v2.bak` and migrated to v3 with local access; the existing panel password remains valid. V3 adds access-mode and advertised-origin settings. Review backups privately and remove them when no longer needed. The plugin does not delete server files on startup.
 
 ## Design and safeguards
 
-The browser UI uses the same-origin API. Every state-changing request requires a session-specific request token, and requests from a foreign browser origin are denied. Sessions expire after two hours and are invalidated when the password changes. Login attempts are throttled. Panel responses use no-store, a restrictive content security policy, and frame protection.
+The browser UI uses the same-origin API. Every authenticated state-changing request requires a session-specific request token, and requests from a foreign browser origin are denied. Sessions expire after two hours and are invalidated when the password or access mode changes. Login and first-run setup attempts are throttled by source address. The listener alone restarts when access changes; if the new address cannot bind, the previous listener and settings are restored. Panel responses use no-store, a restrictive content security policy, and frame protection.
 
 File paths stay under the server process directory, including `plugins/` and `server.properties` even if worlds live elsewhere. The in-panel archive has the same root and does not include world folders outside it. Absolute paths and traversal are rejected; symlinks are never followed. File reads, writes, ZIP operations and backups use open directory handles so a concurrent path replacement cannot redirect them outside the root. The text editor checks the file hash before saving so a stale tab cannot silently replace newer work. Text edits are limited to 2 MiB, uploads to 128 MiB, ZIP source data and extracted archives to 1 GiB each. An archive excludes its own backup directory and is capped at 20 GiB.
 
-**The panel has full server authority after sign-in.** Treat its password, console access, and SSH tunnel as administrator credentials. A localhost-only design limits accidental internet exposure; it does not make an untrusted person safe to grant panel access.
+**The panel has full server authority after sign-in.** Treat its password, console access, and SSH tunnel as administrator credentials. Public HTTP removes the transport protection that localhost with SSH forwarding provides; the login and request protections cannot encrypt network traffic.
 
 ## Development
 
-Build with `mvn package`; run checks with `mvn test`. The shaded candidate JAR is `target/NotABackdoor-1.0.0-beta.3.jar`. Java sources target 17; the API baseline is Paper 1.18.2. Browser assets live in `src/main/resources/panel/`, separate from the HTTP, file, authentication, backup, and relay services.
+Build with `mvn package`; run checks with `mvn test`. The shaded candidate JAR is `target/NotABackdoor-1.0.0-beta.4.jar`. Java sources target 17; the API baseline is Paper 1.18.2. Browser assets live in `src/main/resources/panel/`, separate from the HTTP, file, authentication, backup, and relay services.
 
 The old implementation and pages were removed because several file endpoints could escape the intended directory and one handler ignored an authentication return value. The replacement has no route to those handlers.

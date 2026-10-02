@@ -1,13 +1,12 @@
 package com.lian.notabackdoor.panel;
 
-import com.lian.notabackdoor.panel.files.PanelFiles;
 import com.lian.notabackdoor.panel.relay.RelayClient;
 import com.lian.notabackdoor.panel.security.AuthService;
-import com.lian.notabackdoor.panel.web.PanelServer;
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandSender;
 import org.bukkit.command.ConsoleCommandSender;
 import org.bukkit.command.RemoteConsoleCommandSender;
+import org.bukkit.entity.Player;
 import org.bukkit.plugin.java.JavaPlugin;
 
 import java.io.IOException;
@@ -18,42 +17,54 @@ import java.time.Instant;
 
 public final class NotABackdoorPlugin extends JavaPlugin {
     private AuthService auth;
-    private PanelServer panel;
+    private PanelLifecycle panel;
     private RelayClient relay;
+    private SetupGuide setupGuide;
+    private volatile SetupGuide.Access setupAccess;
 
     @Override
     public void onEnable() {
         try {
             migrateLegacyConfiguration();
             saveDefaultConfig();
-            String bind = getConfig().getString("panel.bind", "127.0.0.1");
-            if (!"127.0.0.1".equals(bind)) {
-                throw new IllegalArgumentException("The embedded panel must bind to 127.0.0.1; use an SSH tunnel for remote access");
-            }
             int port = getConfig().getInt("panel.port", 8127);
-            if (port < 1024 || port > 65535) {
-                throw new IllegalArgumentException("panel.port must be between 1024 and 65535");
-            }
             Path data = getDataFolder().toPath();
             auth = new AuthService(data);
-            // Bukkit's world container can be a custom subdirectory. The server process
-            // directory contains plugins/, server.properties, and other panel files.
-            PanelFiles files = new PanelFiles(Path.of("").toAbsolutePath());
-            try {
-                panel = new PanelServer(this, auth, files, port);
-                panel.start();
-            } catch (Exception startup) {
-                if (panel != null) {
-                    panel.close();
-                    panel = null;
-                } else {
-                    files.close();
+            setupGuide = new SetupGuide(this, auth, () -> setupAccess);
+            getServer().getPluginManager().registerEvents(setupGuide, this);
+            panel = new PanelLifecycle(this, auth);
+            panel.start();
+            setSetupAccess(new SetupGuide.Access() {
+                @Override public String accessMode() { return panel.accessMode(); }
+                @Override public String advertisedOrigin() { return panel.advertisedOrigin(); }
+                @Override public String localOrigin() { return panel.localOrigin(); }
+                @Override public SetupGuide.Result applyLocal() {
+                    PanelLifecycle.Result result = panel.applyLocal();
+                    return new SetupGuide.Result(result.success(), result.message());
                 }
-                throw startup;
-            }
-            getLogger().info("Panel listening at http://127.0.0.1:" + port + "/");
+                @Override public SetupGuide.Result applyPublic(String origin) {
+                    PanelLifecycle.Result result = panel.applyPublic(origin);
+                    return new SetupGuide.Result(result.success(), result.message());
+                }
+                @Override public SetupGuide.Check localHealth() {
+                    PanelLifecycle.Health result = panel.localHealth();
+                    return new SetupGuide.Check(result.reachable(), result.detail());
+                }
+                @Override public String createBrowserProofUrl(java.util.UUID playerId) {
+                    return panel.createBrowserProofUrl(playerId);
+                }
+                @Override public boolean browserProofReceived(java.util.UUID playerId) {
+                    return panel.browserProofReceived(playerId);
+                }
+                @Override public boolean browserLoginReceived(java.util.UUID playerId) {
+                    return panel.browserLoginReceived(playerId);
+                }
+            });
+            getLogger().info("Panel listening at " + panel.advertisedOrigin() + "/");
             if (!auth.isConfigured()) {
-                getLogger().info("Run 'nab setup' from the server console to create the first panel password.");
+                getLogger().info(getServer().getOnlineMode()
+                        ? "An operator can use /nab in game for first-run setup; the console can also run 'nab setup'."
+                        : "Run 'nab setup' from the server console to create the first panel password.");
             }
             try {
                 relay = new RelayClient(data, port, getLogger());
@@ -64,6 +75,10 @@ public final class NotABackdoorPlugin extends JavaPlugin {
             }
         } catch (Exception failure) {
             getLogger().severe("Panel startup failed safely: " + failure.getMessage());
+            if (panel != null) {
+                panel.close();
+                panel = null;
+            }
             getServer().getPluginManager().disablePlugin(this);
         }
     }
@@ -78,21 +93,65 @@ public final class NotABackdoorPlugin extends JavaPlugin {
             panel.close();
             panel = null;
         }
+        setupAccess = null;
     }
 
     @Override
     public boolean onCommand(CommandSender sender, Command command, String label, String[] args) {
+        if (sender instanceof Player player) {
+            if (setupGuide == null) {
+                player.sendMessage("The panel setup guide is unavailable.");
+                return true;
+            }
+            if (args.length == 0 || (args.length == 1 && "setup".equalsIgnoreCase(args[0]))) {
+                setupGuide.open(player);
+            } else if (args.length == 1 && "status".equalsIgnoreCase(args[0])) {
+                setupGuide.status(player);
+            } else {
+                player.sendMessage("Usage: /nab [setup|status]");
+            }
+            return true;
+        }
         if (!(sender instanceof ConsoleCommandSender) && !(sender instanceof RemoteConsoleCommandSender)) {
             sender.sendMessage("This command is available only in the server console.");
+            return true;
+        }
+        if (args.length == 1 && "status".equalsIgnoreCase(args[0])) {
+            sender.sendMessage("Panel " + (auth != null && auth.isConfigured() ? "configured" : "not configured") + ".");
+            SetupGuide.Access access = setupAccess;
+            sender.sendMessage(access == null ? "Panel access service unavailable."
+                    : "Access: " + access.accessMode() + " at " + access.advertisedOrigin());
             return true;
         }
         if (args.length == 1 && "setup".equalsIgnoreCase(args[0])) {
             if (auth == null) {
                 sender.sendMessage("The panel is not running.");
             } else {
-                sender.sendMessage("One-time panel setup code (15 minutes): " + auth.issueSetupCode());
-                sender.sendMessage("Enter this code on the local panel through SSH or your paired HTTPS relay link.");
+                AuthService.FirstRunCode firstRun = auth.firstRunCode();
+                String code = firstRun == null ? auth.issueSetupCode() : firstRun.value();
+                sender.sendMessage("One-time panel setup code (15 minutes): " + code);
+                sender.sendMessage("Enter this code on the panel. Keep the server console private.");
             }
+            return true;
+        }
+        if (args.length >= 2 && "access".equalsIgnoreCase(args[0])) {
+            SetupGuide.Access access = setupAccess;
+            if (access == null) {
+                sender.sendMessage("The panel access service is unavailable. No setting was changed.");
+                return true;
+            }
+            SetupGuide.Result result;
+            if (args.length == 2 && "local".equalsIgnoreCase(args[1])) {
+                result = access.applyLocal();
+            } else if (args.length == 4 && "public".equalsIgnoreCase(args[1])
+                    && SetupGuide.validPublicOrigin(args[2]) && "confirm".equalsIgnoreCase(args[3])) {
+                result = access.applyPublic(args[2]);
+            } else {
+                sender.sendMessage("Public HTTP exposes passwords and sessions in transit.");
+                sender.sendMessage("Usage: nab access local | nab access public http://host:port confirm");
+                return true;
+            }
+            sender.sendMessage(result.message());
             return true;
         }
         if (args.length >= 2 && "relay".equalsIgnoreCase(args[0])) {
@@ -143,8 +202,13 @@ public final class NotABackdoorPlugin extends JavaPlugin {
                 return true;
             }
         }
-        sender.sendMessage("Usage: nab setup | nab relay pair [https-origin] | nab relay status | nab relay revoke (console only)");
+        sender.sendMessage("Usage: nab setup | nab status | nab access local | nab access public http://host:port confirm | nab relay pair [https-origin] | nab relay status | nab relay revoke (console only)");
         return true;
+    }
+
+    /** Installed by the panel lifecycle after its listener has started successfully. */
+    void setSetupAccess(SetupGuide.Access access) {
+        setupAccess = access;
     }
 
     private void migrateLegacyConfiguration() throws IOException {

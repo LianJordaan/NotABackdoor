@@ -1,8 +1,13 @@
-config-version: 2
+config-version: 3
 
-# The panel accepts connections only from this machine. Forward it with SSH:
+# Local mode accepts connections only from this machine. Forward it with SSH:
 # ssh -L 8127:127.0.0.1:8127 user@your-server
+# Public HTTP is available only after an administrator explicitly confirms it.
+# HTTP carries the panel password and session in plaintext on the network.
 panel:
+  access-mode: local
+  advertised-origin: ""
+  # Retained for migration from older configs; binding follows access-mode.
   bind: "127.0.0.1"
   port: 8127
 

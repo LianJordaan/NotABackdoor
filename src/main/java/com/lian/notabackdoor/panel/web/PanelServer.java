@@ -28,7 +28,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 
-/** Local-only HTTP adapter; authentication and every mutation stay in one request path. */
+/** HTTP adapter; authentication and every mutation stay in one request path. */
 public final class PanelServer implements AutoCloseable {
     private static final int MAX_JSON_BYTES = 2 * 1024 * 1024;
     private final JavaPlugin plugin;
@@ -39,17 +39,28 @@ public final class PanelServer implements AutoCloseable {
     private final HttpServer server;
     private final ExecutorService workers;
     private final PanelLog logs;
-    private final int port;
+    private final PanelAccess access;
+    private final SetupProbeService setupProbes;
 
     public PanelServer(JavaPlugin plugin, AuthService auth, PanelFiles files, int port) throws IOException {
+        this(plugin, auth, files, PanelAccess.local(port));
+    }
+
+    public PanelServer(JavaPlugin plugin, AuthService auth, PanelFiles files, PanelAccess access) throws IOException {
+        this(plugin, auth, files, access, new SetupProbeService());
+    }
+
+    public PanelServer(JavaPlugin plugin, AuthService auth, PanelFiles files, PanelAccess access,
+                       SetupProbeService setupProbes) throws IOException {
         this.plugin = plugin;
         this.auth = auth;
         this.files = files;
-        this.port = port;
+        this.access = Objects.requireNonNull(access, "access");
+        this.setupProbes = Objects.requireNonNull(setupProbes, "setupProbes");
         PanelBackups preparedBackups = new PanelBackups(files.root(), plugin.getDataFolder().toPath().resolve("backups"));
         HttpServer preparedServer;
         try {
-            preparedServer = HttpServer.create(new InetSocketAddress("127.0.0.1", port), 32);
+            preparedServer = HttpServer.create(new InetSocketAddress(access.bindAddress(), access.port()), 32);
         } catch (IOException | RuntimeException failure) {
             preparedBackups.close();
             throw failure;
@@ -70,6 +81,10 @@ public final class PanelServer implements AutoCloseable {
         server.start();
     }
 
+    public SetupProbeService setupProbes() {
+        return setupProbes;
+    }
+
     @Override
     public void close() {
         server.stop(1);
@@ -83,6 +98,7 @@ public final class PanelServer implements AutoCloseable {
         try {
             headers(exchange);
             checkHost(exchange);
+            checkOrigin(exchange, false);
             String path = exchange.getRequestURI().getPath();
             if (path.startsWith("/api/")) {
                 api(exchange, path);
@@ -120,9 +136,41 @@ public final class PanelServer implements AutoCloseable {
             JsonObject body = body(exchange);
             String password = required(body, "password", 128);
             try {
-                auth.setPassword(required(body, "code", 100), password.toCharArray());
+                auth.setPassword(required(body, "code", 100), password.toCharArray(),
+                        exchange.getRemoteAddress().getAddress().getHostAddress());
             } catch (SecurityException invalid) {
-                error(exchange, 403, "Invalid or expired setup code");
+                error(exchange, 403, invalid.getMessage());
+                return;
+            }
+            json(exchange, 200, Map.of("ok", true));
+            return;
+        }
+        if (path.equals("/api/setup-check") && method.equals("POST")) {
+            checkOrigin(exchange);
+            JsonObject body = body(exchange);
+            String nonce = required(body, "nonce", 128);
+            String step = required(body, "step", 16);
+            if (step.equals("reach")) {
+                if (!setupProbes.markReached(nonce)) {
+                    error(exchange, 403, "Invalid or expired browser check link");
+                    return;
+                }
+            } else if (step.equals("login")) {
+                AuthService.Session session = auth.authenticate(sessionCookie(exchange));
+                if (session == null) {
+                    error(exchange, 401, "Sign in to complete the browser check");
+                    return;
+                }
+                if (!auth.hasValidCsrf(session, exchange.getRequestHeaders().getFirst("X-CSRF-Token"))) {
+                    error(exchange, 403, "Invalid request token. Refresh and sign in again.");
+                    return;
+                }
+                if (!setupProbes.markLoggedIn(nonce)) {
+                    error(exchange, 403, "Invalid or expired browser check link");
+                    return;
+                }
+            } else {
+                error(exchange, 400, "Unknown browser check step");
                 return;
             }
             json(exchange, 200, Map.of("ok", true));
@@ -291,16 +339,24 @@ public final class PanelServer implements AutoCloseable {
     }
 
     private void checkHost(HttpExchange exchange) {
-        String host = exchange.getRequestHeaders().getFirst("Host");
-        if (!Objects.equals(host, "127.0.0.1:" + port) && !Objects.equals(host, "localhost:" + port)) {
+        List<String> hosts = exchange.getRequestHeaders().get("Host");
+        if (exchange.getRequestURI().isAbsolute() || hosts == null || hosts.size() != 1
+                || !access.allowsHost(hosts.get(0), exchange.getRemoteAddress().getAddress())) {
             throw new SecurityException("Unknown panel host");
         }
     }
 
     private void checkOrigin(HttpExchange exchange) {
-        String origin = exchange.getRequestHeaders().getFirst("Origin");
-        if (origin != null && !origin.equals("http://127.0.0.1:" + port)
-                && !origin.equals("http://localhost:" + port)) {
+        checkOrigin(exchange, access.isPublic());
+    }
+
+    private void checkOrigin(HttpExchange exchange, boolean required) {
+        List<String> origins = exchange.getRequestHeaders().get("Origin");
+        if (origins != null && origins.size() != 1) {
+            throw new SecurityException("Cross-site panel requests are blocked");
+        }
+        String origin = origins == null ? null : origins.get(0);
+        if (!access.allowsOrigin(origin, exchange.getRemoteAddress().getAddress(), required)) {
             throw new SecurityException("Cross-site panel requests are blocked");
         }
     }

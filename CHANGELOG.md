@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.0.0-beta.4 — setup guide candidate
+
+- Added a private 27-slot `/nab` guide with panel access, setup code, browser setup, and connection checks. An operator with `notabackdoor.admin` receives a clickable reminder on joining an unconfigured server; the menu does not open automatically. `/nab status` remains available after setup.
+- On direct online-mode servers, permitted operators can share one unexpired 15-minute first-run code. On offline-mode servers and Velocity backends, code issuance and access changes remain console-only. Password resets remain console-only everywhere.
+- Added explicit public HTTP access with a warning and exact advertised `http://host:port` address, alongside the default localhost mode. Changing modes restarts only the panel listener, revokes sessions and pending setup codes, and restores the prior listener and settings if the new one fails.
+- Added versioned access settings, source-specific first-run attempt limits, exact public Host/Origin checks, and a short-lived browser connection check. The browser warns that public HTTP exposes passwords and sessions in transit; its check proves only that the browser opening its link reached the panel.
+- Beta.4 needs its own exact-JAR Paper and authenticated operator walkthrough results. Beta.3 results remain historical and are not carried forward as beta.4 passes.
+
 ## 1.0.0-beta.3 — public beta release
 
 - The supported setup uses the panel's localhost HTTP listener, with SSH forwarding for remote access. The packaged outbound relay connector remains experimental and is not provided as a public service for this release.

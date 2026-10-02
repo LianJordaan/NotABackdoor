@@ -36,12 +36,13 @@ public final class AuthService {
     private final int iterations;
     private final Map<String, Session> sessions = new ConcurrentHashMap<>();
     private final Map<String, Failure> failures = new ConcurrentHashMap<>();
+    private final Map<String, Failure> setupFailures = new ConcurrentHashMap<>();
     private byte[] passwordSalt;
     private byte[] passwordHash;
     private int passwordIterations;
     private String setupCode;
     private Instant setupExpiresAt;
-    private int setupFailures;
+    private Instant lastSuccessfulLoginAt;
 
     public AuthService(Path dataDirectory) throws IOException {
         this(dataDirectory, Clock.systemUTC(), PRODUCTION_ITERATIONS);
@@ -64,17 +65,41 @@ public final class AuthService {
     public synchronized String issueSetupCode() {
         setupCode = randomToken(12);
         setupExpiresAt = clock.instant().plus(SETUP_LIFETIME);
-        setupFailures = 0;
+        setupFailures.clear();
         return setupCode;
     }
 
+    /** Shares an unexpired first-run code across operators without granting password resets. */
+    public synchronized FirstRunCode firstRunCode() {
+        if (isConfigured()) return null;
+        if (setupCode == null || !clock.instant().isBefore(setupExpiresAt)) {
+            issueSetupCode();
+        }
+        return new FirstRunCode(setupCode, setupExpiresAt);
+    }
+
+    /** Invalidates a pending code when the panel's network access changes. */
+    public synchronized void revokeSetupCode() {
+        setupCode = null;
+        setupExpiresAt = null;
+        setupFailures.clear();
+    }
+
     public synchronized void setPassword(String code, char[] password) throws IOException {
+        setPassword(code, password, "unknown");
+    }
+
+    public synchronized void setPassword(String code, char[] password, String remoteAddress) throws IOException {
+        String source = sourceKey(remoteAddress);
+        Instant now = clock.instant();
+        Failure failure = setupFailures.get(source);
+        if (failure != null && now.isBefore(failure.expiresAt()) && failure.count() >= MAX_FAILURES) {
+            throw new SecurityException("Too many setup attempts from this address; try again later");
+        }
         if (setupCode == null || !clock.instant().isBefore(setupExpiresAt)
                 || !constantTimeEquals(setupCode, code)) {
-            setupFailures++;
-            if (setupFailures >= MAX_FAILURES) {
-                setupCode = null;
-            }
+            int count = failure == null || !now.isBefore(failure.expiresAt()) ? 1 : failure.count() + 1;
+            setupFailures.put(source, new Failure(count, now.plus(FAILURE_WINDOW)));
             throw new SecurityException("Invalid or expired setup code");
         }
         if (password == null || password.length < 12 || password.length > 128) {
@@ -91,10 +116,11 @@ public final class AuthService {
         setupCode = null;
         sessions.clear();
         failures.clear();
+        setupFailures.clear();
     }
 
     public synchronized Login login(char[] password, String remoteAddress) {
-        String source = remoteAddress == null ? "unknown" : remoteAddress;
+        String source = sourceKey(remoteAddress);
         Instant now = clock.instant();
         Failure failure = failures.get(source);
         if (failure != null && now.isBefore(failure.expiresAt()) && failure.count() >= MAX_FAILURES) {
@@ -110,7 +136,17 @@ public final class AuthService {
         String token = randomToken(32);
         Session session = new Session(randomToken(32), now.plus(SESSION_LIFETIME));
         sessions.put(token, session);
+        lastSuccessfulLoginAt = now;
         return new Login(token, session.csrfToken());
+    }
+
+    public synchronized Instant lastSuccessfulLoginAt() {
+        return lastSuccessfulLoginAt;
+    }
+
+    /** Called when changing the listener's network exposure. */
+    public synchronized void revokeSessions() {
+        sessions.clear();
     }
 
     public Session authenticate(String token) {
@@ -211,6 +247,11 @@ public final class AuthService {
                 expected.getBytes(StandardCharsets.UTF_8), actual.getBytes(StandardCharsets.UTF_8));
     }
 
+    private static String sourceKey(String remoteAddress) {
+        return remoteAddress == null || remoteAddress.isBlank() ? "unknown" : remoteAddress;
+    }
+
+    public record FirstRunCode(String value, Instant expiresAt) { }
     public record Session(String csrfToken, Instant expiresAt) { }
     public record Login(String token, String csrfToken) { }
     private record Failure(int count, Instant expiresAt) { }
