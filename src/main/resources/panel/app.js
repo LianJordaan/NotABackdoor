@@ -21,6 +21,7 @@ const state = {
   metricRequest: 0,
   consoleCursor: null,
   consoleLoading: false,
+  consoleTruncated: false,
   backupJobId: null,
   backupPolling: false,
   backupJobTerminal: false,
@@ -297,12 +298,12 @@ async function loadMetrics() {
 
 function renderMetrics() {
   const samples = state.metricSamples;
-  const latest = state.metricWindow?.latest || samples.at(-1);
+  const latest = state.metricWindow?.latest;
   $("stat-cpu").textContent = metricText("cpuPercent", latest?.cpuPercent == null ? NaN : Number(latest.cpuPercent));
   $("stat-tps").textContent = metricText("tps", latest?.tps == null ? NaN : Number(latest.tps));
   $("stat-mspt").textContent = metricText("mspt", latest?.mspt == null ? NaN : Number(latest.mspt));
   $("stat-memory").textContent = metricText("memoryUsedBytes", latest?.memoryUsedBytes == null ? NaN : Number(latest.memoryUsedBytes));
-  $("stat-memory-limit").textContent = latest?.memoryMaxBytes ? `of ${formatSize(latest.memoryMaxBytes)} allocated` : "Heap in use";
+  $("stat-memory-limit").textContent = latest?.memoryMaxBytes ? `of ${formatSize(latest.memoryMaxBytes)} max heap` : "Heap in use";
   const players = latest?.players == null ? NaN : Number(latest.players);
   $("metric-players").textContent = `${Number.isFinite(players) ? players : "—"} ${players === 1 ? "player" : "players"} online`;
   $("metric-title").textContent = metricLabels[state.metricName];
@@ -343,7 +344,7 @@ function renderMetricChart() {
   $("chart-min").textContent = metricText(name, 0);
   const plotted = values.filter(item => item.timestamp >= from && item.timestamp <= now + 1000);
   $("chart-empty").hidden = plotted.length > 0;
-  $("metric-chart").setAttribute("aria-label", `${metricLabels[name]} over the selected ${state.metricRange} range`);
+  $("metric-chart").setAttribute("aria-label", `${metricLabels[name]} over the selected ${state.metricRange} range. ${plotted.length} samples${plotted.length ? `; latest ${metricText(name, Number(plotted.at(-1)[name]))}` : "; no data yet"}.`);
   if (!plotted.length) {
     $("chart-line").setAttribute("d", "");
     $("chart-area").setAttribute("d", "");
@@ -730,25 +731,39 @@ async function loadLogs(reset = false) {
     const data = await request(`/api/console/output${suffix}`);
     const container = $("console-lines");
     const nearBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 80;
-    if (reset || data.reset) container.replaceChildren();
+    if (reset || data.reset) {
+      container.replaceChildren();
+      state.consoleTruncated = Boolean(data.truncated);
+    } else if (data.truncated) state.consoleTruncated = true;
+    if (state.consoleTruncated && !container.querySelector(".console-marker")) {
+      container.prepend(node("div", "console-marker", "Older console output is omitted. This view keeps the newest lines."));
+    }
     const lines = Array.isArray(data.lines) ? data.lines : [];
+    if (lines.length) container.querySelectorAll(".empty-state").forEach(message => message.remove());
     for (const line of lines) {
       const text = String(line);
       const severity = /\b(?:ERROR|SEVERE|FATAL)\b/.test(text) ? "severe" : /\bWARN(?:ING)?\b/.test(text) ? "warning" : "";
       container.append(node("div", `console-line ${severity}`, text));
     }
-    while (container.childElementCount > 1000) container.firstElementChild.remove();
+    while (container.childElementCount > 1000) {
+      const oldestLine = container.querySelector(".console-line");
+      if (!oldestLine) break;
+      oldestLine.remove();
+      state.consoleTruncated = true;
+    }
+    if (state.consoleTruncated && !container.querySelector(".console-marker")) {
+      container.prepend(node("div", "console-marker", "Older console output is omitted. This view keeps the newest lines."));
+    }
     state.consoleCursor = data.cursor || null;
     if (!data.available && !container.childElementCount) {
-      container.append(node("div", "empty-state", "The Minecraft log is not available yet. Start the server and refresh."));
+      container.append(node("div", "empty-state", "Minecraft has not created latest.log yet. Retry shortly or check logging configuration."));
     }
     if (data.available && !container.childElementCount) {
       container.append(node("div", "empty-state", "No console output yet."));
     }
-    if (lines.length && container.firstElementChild?.classList.contains("empty-state")) container.firstElementChild.remove();
     if ($("console-follow").checked && nearBottom) container.scrollTop = container.scrollHeight;
     $("console-status").textContent = data.available
-      ? ` Live · ${shortTime(Date.now())}${data.truncated ? " · Older lines omitted" : ""}`
+      ? ` Live · ${shortTime(Date.now())}${state.consoleTruncated ? " · Older lines omitted" : ""}`
       : " Waiting for latest.log";
   } finally { state.consoleLoading = false; }
 }
@@ -992,7 +1007,7 @@ for (const button of document.querySelectorAll("[data-range]")) {
     loadMetrics().catch(fail);
   });
 }
-$("metric-chart").addEventListener("mousemove", event => {
+function showChartPoint(event) {
   const points = state.chartPoints || [];
   if (!points.length) return;
   const plot = $("metric-chart").getBoundingClientRect();
@@ -1002,8 +1017,15 @@ $("metric-chart").addEventListener("mousemove", event => {
   tooltip.textContent = `${shortTime(nearest.sample.timestamp, state.metricRange === "1d" || state.metricRange === "1w")} · ${metricText(state.metricName, Number(nearest.sample[state.metricName]))}`;
   tooltip.style.left = `${Math.max(0, Math.min(plot.width - 170, event.clientX - plot.left + 12))}px`;
   tooltip.hidden = false;
+}
+$("metric-chart").addEventListener("pointermove", showChartPoint);
+$("metric-chart").addEventListener("pointerdown", showChartPoint);
+$("metric-chart").addEventListener("pointerleave", event => {
+  if (event.pointerType !== "touch") $("chart-tooltip").hidden = true;
 });
-$("metric-chart").addEventListener("mouseleave", () => { $("chart-tooltip").hidden = true; });
+$("metric-chart").addEventListener("pointerup", event => {
+  if (event.pointerType === "touch") setTimeout(() => { $("chart-tooltip").hidden = true; }, 4000);
+});
 setInterval(() => {
   if (!state.csrf) return;
   if (state.view === "console") loadLogs().catch(fail);

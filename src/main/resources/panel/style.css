@@ -229,6 +229,7 @@ code { padding: 2px 5px; border-radius: 4px; background: #233143; color: #cef9dc
 .console-line { border-bottom: 1px solid #2632436b; padding: 4px 0; color: #d6e1ed; overflow-wrap: anywhere; white-space: pre-wrap; }
 .console-line.warning { color: #ffd69b; }
 .console-line.severe { color: var(--danger); }
+.console-marker { padding: 9px 11px; margin-bottom: 8px; border: 1px solid #536476; border-radius: 8px; background: #233244; color: #c8d7e5; font: .73rem/1.4 ui-sans-serif, system-ui, sans-serif; }
 .follow-toggle { display: inline-flex; align-items: center; gap: 8px; color: var(--muted); font-size: .76rem; font-weight: 590; white-space: nowrap; }
 .command-form { padding: 14px 17px; border-top: 1px solid var(--line); display: flex; align-items: center; gap: 10px; }
 .command-form input { border: 0; background: #1a2738; }
