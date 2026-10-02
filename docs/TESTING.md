@@ -1,6 +1,44 @@
 # NotABackdoor exact-JAR test record
 
-## Guided setup 1.0.0-beta.4 candidate
+## Current combined panel and setup 1.0.0-beta.4 candidate
+
+The current frozen candidate is `testing/notabackdoor/candidates/NotABackdoor-beta.4-b979de793c65.jar` in the parent workspace, built from source revision `01bfe604d5560a562eafe0e8125bb56419fcc1e4`. Its SHA-512 is:
+
+```text
+b979de793c659abdd3d5a5cd23dbdbd9246a49cc0212d4883ed665014112bea5397af384ff6b1c72298e00846600cffede2d204a6323aca2d2890427cdb3b1e9
+```
+
+This JAR keeps the console, metrics, backup progress, bulk file actions, and in-game setup work below. It also queues a requested console refresh while an earlier log request is in flight and reconciles backup progress when the page stays open. Its separate exact-JAR run is `testing/notabackdoor/live-beta4-combined/20261002-beta4-combined-full-b979de793c65/`. All eight direct online/offline cases passed two startup rounds with the unchanged JAR. Each first round recorded 89 successful access and panel checks; each restart round recorded 83. The expanded probe covered actual Minecraft console output and incremental cursors, all nine metric ranges, background backup completion, and bulk ZIP/TAR/delete. Test worlds were retained and servers stopped.
+
+| Minecraft | Paper build | Java | Offline | Online |
+| --- | ---: | ---: | --- | --- |
+| 1.18.2 | 388 | 17 | Pass | Pass |
+| 1.21.11 | 132 | 21 | Pass | Pass |
+| 26.2 | 129 | 25 | Pass | Pass |
+| 26.3 (experimental) | 140 | 25 | Pass | Pass |
+
+On Linux ext4 with Java 17, all **47 Maven tests passed with none skipped**. Node's syntax check passed against `panel/app.js` inside this exact JAR. A browser visual review is not independently verified in this environment. A fresh authenticated LianJordaan operator walkthrough against this hash remains the release gate; the earlier combined candidate's passing tests and user confirmation do not transfer. Paper 26.3 is experimental.
+
+## Historical combined panel and setup 1.0.0-beta.4 candidate
+
+The frozen combined candidate is `testing/notabackdoor/candidates/NotABackdoor-beta.4-3312bade3697.jar` in the parent workspace, built from source revision `185f2704ae4099d4e79b219a8ce614380a2c5c59`. Its SHA-512 is:
+
+```text
+3312bade36973d6792a2402f97836834976199ab86a8b49f4989c431b30825422679218ef66dba75f89aae9972a7f11ca47ba6fd6aba6e8ef164c162d726afb5
+```
+
+This candidate adds Minecraft's full `logs/latest.log` console, CPU/TPS/tick and heap history, background backup progress, and bulk ZIP/TAR/delete to the in-game setup and access work below. The separate exact-JAR record is `testing/notabackdoor/live-beta4-combined/20261002-beta4-combined-full-3312bade3697/` in the parent workspace. All eight direct online/offline cases passed two startup rounds with the unchanged JAR. Each first round recorded 89 successful access and panel checks; each restart round recorded 83. The expanded probe covered actual Minecraft console output and incremental cursors, all nine metric ranges, background backup completion, and bulk ZIP/TAR/delete. Test worlds were retained and servers stopped.
+
+| Minecraft | Paper build | Java | Offline | Online |
+| --- | ---: | ---: | --- | --- |
+| 1.18.2 | 388 | 17 | Pass | Pass |
+| 1.21.11 | 132 | 21 | Pass | Pass |
+| 26.2 | 129 | 25 | Pass | Pass |
+| 26.3 (experimental) | 140 | 25 | Pass | Pass |
+
+On Linux ext4 with Java 17, all **47 Maven tests passed with none skipped**. Node's syntax check passed against `panel/app.js` inside this exact JAR. LianJordaan confirmed the setup guide and new panel views on an authenticated direct online-mode Paper 26.2 server. The redacted log confirms the authenticated join; menu and browser behavior were user-confirmed rather than independently observed. A browser visual review was not independently verified in this environment. Paper 26.3 is experimental. This JAR was held back after a later panel UI fix and has not been published.
+
+## Historical guided setup 1.0.0-beta.4 candidate
 
 Beta.4 adds an operator setup guide and an opt-in public HTTP listener. The frozen candidate is `testing/notabackdoor/candidates/NotABackdoor-beta.4-502b805f3781.jar` in the parent workspace, built from source revision `7dd68184181f9a11bcc23e40c1eca6b1883f33eb`. Its SHA-512 is:
 
@@ -17,7 +55,7 @@ The beta.3 hash and results below remain historical; they do **not** qualify thi
 | 26.2 | 129 | 25 | Pass | Pass |
 | 26.3 (experimental) | 140 | 25 | Pass | Pass |
 
-Machine-readable receipts and `testing/notabackdoor/live-beta4/20261002-beta4-502b805f3781/report.md` are stored locally in the parent workspace. On Linux with Java 17, all **33 Maven tests passed with none skipped**. Headless Edge passed first-run password creation, login, plain-HTTP warning, and frozen HTML/CSS/JS asset checks with no page errors. The authenticated LianJordaan OP walkthrough is still pending; automated online-mode startup does not prove a real account joined or used the guide. Beta.4 has not been published yet.
+Machine-readable receipts and `testing/notabackdoor/live-beta4/20261002-beta4-502b805f3781/report.md` are stored locally in the parent workspace. On Linux with Java 17, all **33 Maven tests passed with none skipped**. Headless Edge passed first-run password creation, login, plain-HTTP warning, and frozen HTML/CSS/JS asset checks with no page errors. LianJordaan confirmed the in-game setup walkthrough on an authenticated direct online-mode Paper 26.2 server. The redacted server log confirms the authenticated join; the menu and browser outcomes are user-confirmed rather than independently observed. This setup-only JAR was held back when the panel feature scope expanded and has not been published.
 
 Run automated authentication, menu, configuration, HTTP, browser, and restart checks first. In particular, verify that two permitted operators receive the same unexpired 15-minute first-run code; five invalid setup attempts from one source do not invalidate another source's valid code; only the console can reset an existing password; offline-mode operators cannot issue codes or change access; and loss of OP or `notabackdoor.admin` permission blocks commands and menu clicks. Test shift-click, drag, number-key, double-click, and bottom-inventory interactions while the guide is open.
 
