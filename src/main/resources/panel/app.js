@@ -343,7 +343,8 @@ function renderMetricChart() {
   $("chart-mid").textContent = metricText(name, upper / 2);
   $("chart-min").textContent = metricText(name, 0);
   const plotted = values.filter(item => item.timestamp >= from && item.timestamp <= now + 1000);
-  $("chart-empty").hidden = plotted.length > 0;
+  $("chart-empty").hidden = plotted.length >= 2;
+  $("chart-empty").textContent = plotted.length === 1 ? "Waiting for another sample…" : "Collecting performance samples…";
   $("metric-chart").setAttribute("aria-label", `${metricLabels[name]} over the selected ${state.metricRange} range. ${plotted.length} samples${plotted.length ? `; latest ${metricText(name, Number(plotted.at(-1)[name]))}` : "; no data yet"}.`);
   if (!plotted.length) {
     $("chart-line").setAttribute("d", "");
@@ -526,11 +527,18 @@ async function deleteSelection() {
   if (!answer) return;
   const closesEditor = state.editor && paths.some(path => state.editor.path === path || state.editor.path.startsWith(`${path}/`));
   if (closesEditor && !(await canCloseEditor())) return;
-  await request("/api/files/bulk", {method: "DELETE", body: {paths, confirmPaths: paths}});
-  if (closesEditor) closeEditorNow();
-  state.selectedFiles.clear();
-  toast(`${paths.length} ${paths.length === 1 ? "item" : "items"} deleted.`);
-  await loadFiles(state.directory);
+  const approvedEditor = state.editor;
+  if (closesEditor) { $("editor-text").readOnly = true; $("save-editor").disabled = true; }
+  try {
+    await request("/api/files/bulk", {method: "DELETE", body: {paths, confirmPaths: paths}});
+    if (closesEditor && state.editor === approvedEditor) closeEditorNow();
+    state.selectedFiles.clear();
+    toast(`${paths.length} ${paths.length === 1 ? "item" : "items"} deleted.`);
+  } finally {
+    $("editor-text").readOnly = false;
+    $("save-editor").disabled = false;
+    await loadFiles(state.directory);
+  }
 }
 
 async function createFile(directory) {
@@ -730,7 +738,6 @@ async function loadLogs(reset = false) {
     const suffix = state.consoleCursor ? `?cursor=${encodeURIComponent(state.consoleCursor)}` : "";
     const data = await request(`/api/console/output${suffix}`);
     const container = $("console-lines");
-    const nearBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 80;
     if (reset || data.reset) {
       container.replaceChildren();
       state.consoleTruncated = Boolean(data.truncated);
@@ -761,7 +768,7 @@ async function loadLogs(reset = false) {
     if (data.available && !container.childElementCount) {
       container.append(node("div", "empty-state", "No console output yet."));
     }
-    if ($("console-follow").checked && nearBottom) container.scrollTop = container.scrollHeight;
+    if ($("console-follow").checked) container.scrollTop = container.scrollHeight;
     $("console-status").textContent = data.available
       ? ` Live · ${shortTime(Date.now())}${state.consoleTruncated ? " · Older lines omitted" : ""}`
       : " Waiting for latest.log";
@@ -1003,10 +1010,18 @@ for (const button of document.querySelectorAll("[data-metric]")) {
 for (const button of document.querySelectorAll("[data-range]")) {
   button.addEventListener("click", () => {
     state.metricRange = button.dataset.range;
+    state.metricSamples = [];
     renderMetrics();
     loadMetrics().catch(fail);
   });
 }
+listen("console-follow", "change", event => {
+  if (event.currentTarget.checked) $("console-lines").scrollTop = $("console-lines").scrollHeight;
+});
+$("console-lines").addEventListener("scroll", () => {
+  const container = $("console-lines");
+  if (container.scrollHeight - container.scrollTop - container.clientHeight > 120) $("console-follow").checked = false;
+});
 function showChartPoint(event) {
   const points = state.chartPoints || [];
   if (!points.length) return;

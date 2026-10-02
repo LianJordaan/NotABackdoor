@@ -117,6 +117,8 @@ public final class PanelServer implements AutoCloseable {
             }
         } catch (PanelFiles.ConflictException conflict) {
             error(exchange, 409, conflict.getMessage());
+        } catch (IllegalStateException conflict) {
+            error(exchange, 409, conflict.getMessage());
         } catch (SecurityException forbidden) {
             error(exchange, 403, forbidden.getMessage());
         } catch (IllegalArgumentException badInput) {
