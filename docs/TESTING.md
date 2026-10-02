@@ -1,6 +1,31 @@
 # NotABackdoor exact-JAR test record
 
-## 1.0.0-beta.1 candidate
+## Secure-file 1.0.0-beta.1 candidate
+
+The current frozen candidate in the parent workspace is `testing/notabackdoor/candidates/NotABackdoor-beta.1-7827286ffc8c.jar`, built from production-source commit `df5be879e076940ddbb35e682af31c2a4d1a65b1`. Its SHA-512 is:
+
+```text
+7827286ffc8c792a480e9b005d339cb4d9574b7c0968cf19b1c8814605bb7dd2391787b883a3caab5fdebbb008849fdd4a33fea4c16cb2ce25dc113da259ae7b
+```
+
+The file manager, downloads, ZIP operations, and backups now work relative to open `SecureDirectoryStream` handles to prevent a concurrent symlink swap from redirecting them outside the server root. The plugin refuses to start if the Java filesystem provider has no secure directory handles. The default Windows JDK provider is unsupported; the five live probes below used Ubuntu 24.04 WSL2 on a local Linux filesystem. The remote real-client probe ran on Linux. The prior beta candidate and its results remain below as history, but its JAR has a known symlink-swap escape and must not be published.
+
+The Linux Java 17 Maven build passed **18 tests, none skipped**, including symlink-swap stress checks for read, download, upload/edit, ZIP, and backups. `node --check` passed for the browser script. A clean checkout of the source commit was rebuilt with Java 17; all **318 JAR ZIP entries** matched the frozen candidate byte-for-byte. The archive's whole-file hash differs because ZIP container metadata differs. The attestation is `testing/notabackdoor/candidates/attestation-secure-beta1.json` in the parent workspace.
+
+Each pinned Paper binary and Java runtime was recorded. The **same frozen JAR** passed 40 panel checks at first startup and 41 after a stop/restart, including password persistence. Every test server was stopped with its world retained. Paper 26.3 is experimental.
+
+| Minecraft | Paper build | Java | Offline-mode result |
+| --- | ---: | ---: | --- |
+| 1.18.2 | 388 | 17 | 40 + 41 checks passed |
+| 1.21.11 | 132 | 21 | 40 + 41 checks passed |
+| 26.2 | 129 | 25 | 40 + 41 checks passed |
+| 26.3 (experimental) | 140 | 25 | 40 + 41 checks passed |
+
+Paper 26.2 build 129 also passed 40 + 41 checks with `online-mode=true`. The machine-readable receipts, Paper SHA-256 hashes, redacted diagnostics, and stopped WSL worlds are under `testing/notabackdoor/live-secure-beta1/` in the parent workspace. The browser assets are byte-identical to the earlier screenshot build, so the eight unedited desktop/mobile screenshots below still represent this candidate's UI; those browser interactions were run on the earlier JAR and are not counted as current-JAR live checks.
+
+The secure-file candidate separately passed a **30/30** real-client probe on Paper 1.21.11 build 132, Java 21, with `online-mode=false`. The scripted client joined while panel actions changed operator, console, whitelist, ban, and pardon state; the probe checked each game outcome and stopped the retained server afterward. One explicit Paper connection-throttle response was retried before the actual ban-denial check passed. A prior failed probe stopped at a throttle response after 27 checks and remains in history. The passing receipt is `testing/notabackdoor/live-client/20261002T014446Z/result.json` in the parent workspace. No Microsoft-authenticated login was tested.
+
+## Historical 1.0.0-beta.1 candidate
 
 The frozen beta is `testing/notabackdoor/candidates/NotABackdoor-beta.1-957e24e59991.jar` in the parent workspace, built from production-code commit `d4ef773fb95a1e7b6032793993acc7efe6a6f2e9`. Its SHA-512 is:
 
