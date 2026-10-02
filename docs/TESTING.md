@@ -17,11 +17,17 @@ The frozen beta is `testing/notabackdoor/candidates/NotABackdoor-beta.1-957e24e5
 | 26.2 | 129 | 25 | 41/41 checks passed |
 | 26.3 (experimental) | 140 | 25 | 41/41 checks passed |
 
-Paper 26.2 build 129 also passed 41/41 checks with `online-mode=true`. The checks cover setup, password persistence, session and request-token enforcement, Host/Origin/traversal denial, file actions, ZIP/unzip, logs, player-list API, command dispatch, backup create/download/delete, and logout. These are automated panel checks; no Minecraft player joined. The online-mode result proves the panel runs while server authentication is enabled, but does not prove real account login.
+Paper 26.2 build 129 also passed 41/41 checks with `online-mode=true`. The checks cover setup, password persistence, session and request-token enforcement, Host/Origin/traversal denial, file actions, ZIP/unzip, logs, player-list API, command dispatch, backup create/download/delete, and logout. These four-version automated panel checks did not join a Minecraft player. The online-mode result proves the panel runs while server authentication is enabled, but does not prove real account login.
 
 Machine-readable receipts and server logs are under `testing/notabackdoor/live-beta1/paper-<version>-b<build>-<mode>/` in the parent workspace. On Paper 1.18.2, headless Edge also passed desktop/mobile navigation, text-editor interaction, and eight unedited screenshots with no page errors. Four separate browser checks for unsaved edits, delayed navigation, and expired-session download recovery passed. Their receipts and captures are in `testing/notabackdoor/live-beta1/screenshots/`; selected captures are embedded in this repository's README and testing page.
 
-The beta has not been tested on other Minecraft versions, Purpur, Spigot, Bukkit, or a live player login. The panel binds to localhost; the documented remote route requires SSH access. A host offering only plugin upload and console access cannot use this remote route.
+### Real-client panel probe
+
+The **same frozen beta JAR** passed a separate **30/30** probe on Paper **1.21.11 build 132**, Java **21**, with `online-mode=false`. A scripted Minecraft protocol client joined the running server while an authenticated panel session sent operator, console, whitelist, ban, and pardon actions. The probe observed the player list and operator state, the console message arriving in the client, successful whitelisted rejoin, rejection after whitelist removal, an immediate ban kick and rejected rejoin, then successful rejoin after pardon. It also checked that anonymous or logged-out panel requests, a missing request token, and malformed console commands were rejected. The server stopped after the probe; its world was retained.
+
+The machine-readable receipt and readable report are `testing/notabackdoor/live-client/20261002T004250Z/result.json` and `report.md` in the parent workspace. The receipt records the installed plugin SHA-512 above, Paper JAR SHA-256, test timestamps, individual outcomes, and server logs. This probe verifies real game connections in **offline mode**; it does not establish Microsoft-authenticated player login in online mode. The separate 26.2 online-mode panel API probe did not join a player.
+
+The beta has not been tested on other Minecraft versions, Purpur, Spigot, or Bukkit. The panel binds to localhost; the documented remote route requires SSH access. A host offering only plugin upload and console access cannot use this remote route.
 
 ## Historical 1.0.0-dev candidate
 
@@ -56,4 +62,4 @@ Headless Edge opened the real panel on Paper 1.18.2, signed in, navigated all vi
 
 ![Overview on a narrow mobile viewport](screenshots/overview-mobile.png)
 
-The screenshots are unedited captures of the frozen candidate. The browser checks did not join the Minecraft server as a player. All test servers were loopback-bound; the four-version sweep used `online-mode=false`, and the extra Paper 26.2 check used `online-mode=true`. These checks do not establish real player login behavior or compatibility on untested Paper builds, Spigot, Purpur, or other loaders.
+The screenshots are unedited captures of the frozen candidate. The browser checks did not join the Minecraft server as a player. All test servers were loopback-bound; the four-version sweep used `online-mode=false`, and the extra Paper 26.2 panel check used `online-mode=true`. The separate 1.21.11 offline-mode real-client probe above tested game connections. None of these checks establish Microsoft-authenticated player login or compatibility on untested Paper builds, Spigot, Purpur, or other loaders.
