@@ -14,6 +14,7 @@ import ssl
 import subprocess
 import tempfile
 import unittest
+from xml.etree import ElementTree
 
 from aiohttp import ClientSession, ClientTimeout, CookieJar, TCPConnector, web
 
@@ -25,7 +26,9 @@ JAVA_HOME = Path(os.environ.get("JAVA_HOME", r"C:\Program Files\Java\jdk-17"))
 JAVA = shutil.which("java") if not (JAVA_HOME / "bin/java.exe").exists() else str(JAVA_HOME / "bin/java.exe")
 KEYTOOL = shutil.which("keytool") if not (JAVA_HOME / "bin/keytool.exe").exists() else str(JAVA_HOME / "bin/keytool.exe")
 OPENSSL = shutil.which("openssl") or r"C:\Program Files\Git\usr\bin\openssl.exe"
-JAR = ROOT / "target/NotABackdoor-1.0.0-beta.2.jar"
+PROJECT_VERSION = ElementTree.parse(ROOT / "pom.xml").getroot().findtext(
+    "{http://maven.apache.org/POM/4.0.0}version")
+JAR = ROOT / "target" / f"NotABackdoor-{PROJECT_VERSION}.jar"
 
 
 @unittest.skipUnless(JAVA and KEYTOOL and Path(OPENSSL).exists() and JAR.exists(),
