@@ -2,7 +2,7 @@
 
 A small web panel that runs inside a Paper server. It is for server owners who need to edit a configuration, look at a log, or moderate a player without navigating a full hosting control panel.
 
-The publicly listed `1.0.0-beta.3` release provides the localhost panel and improved browser interface. The `1.0.0-beta.4` candidate adds a private in-game setup guide and an explicitly enabled public HTTP mode. Keep using a separate server or a host backup while testing the new candidate. The [experimental outbound relay connector](relay/README.md) is not part of its supported setup.
+The publicly listed `1.0.0-beta.3` release provides the localhost panel and improved browser interface. The `1.0.0-beta.4` candidate adds a private in-game setup guide and an explicitly enabled public HTTP mode. Its [exact-JAR automated checks](docs/TESTING.md#guided-setup-100-beta4-candidate) pass on four pinned Paper versions; an authenticated operator walkthrough remains before publication. Keep using a separate server or a host backup while testing the candidate. The [experimental outbound relay connector](relay/README.md) is not part of its supported setup.
 
 ![Desktop overview of the NotABackdoor panel](docs/screenshots/overview-desktop.png)
 
@@ -26,7 +26,7 @@ The publicly listed `1.0.0-beta.3` release provides the localhost panel and impr
 
 **Public HTTP is unencrypted.** People on the network path may read panel passwords, sessions, files, and commands. It is disabled by default; use localhost or an SSH tunnel for private access. The configured public address must have an exact host and explicit port; applying it updates and saves the listener port. Public mode accepts only that Host and Origin, while preserving local health access. The browser check proves only the browser that opened its link reached the panel; it does not prove reachability from every network. Change `panel.port` in `plugins/NotABackdoor/config.yml` if 8127 is in use.
 
-The file manager and backups require a Java filesystem provider with `SecureDirectoryStream`, which keeps operations bound to open directory handles during symlink swaps. If the provider lacks it, the plugin refuses to start and logs `This filesystem has no race-safe directory handles; panel file access is disabled`. The tested Linux filesystem supports it; the default Windows JDK provider does not. The exact beta.3 candidate passed the [pinned live checks](docs/TESTING.md#backup-copy-100-beta3-candidate); beta.4 needs its own record.
+The file manager and backups require a Java filesystem provider with `SecureDirectoryStream`, which keeps operations bound to open directory handles during symlink swaps. If the provider lacks it, the plugin refuses to start and logs `This filesystem has no race-safe directory handles; panel file access is disabled`. The tested Linux filesystem supports it; the default Windows JDK provider does not. The beta.4 candidate has its own [pinned live test record](docs/TESTING.md#guided-setup-100-beta4-candidate), separate from beta.3.
 
 On Paper 1.21.11, a scripted offline-mode Minecraft client also verified that panel operator, console, whitelist, and ban actions affect a connected player and subsequent joins. The [beta.3 test record](docs/TESTING.md#backup-copy-100-beta3-candidate) distinguishes this 30/30 end-to-end result from the four-version panel API checks. A Microsoft-authenticated player login has not been tested.
 

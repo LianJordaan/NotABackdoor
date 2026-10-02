@@ -6,7 +6,7 @@
 - On direct online-mode servers, permitted operators can share one unexpired 15-minute first-run code. On offline-mode servers and Velocity backends, code issuance and access changes remain console-only. Password resets remain console-only everywhere.
 - Added explicit public HTTP access with a warning and exact advertised `http://host:port` address, alongside the default localhost mode. Changing modes restarts only the panel listener, revokes sessions and pending setup codes, and restores the prior listener and settings if the new one fails.
 - Added versioned access settings, source-specific first-run attempt limits, exact public Host/Origin checks, and a short-lived browser connection check. The browser warns that public HTTP exposes passwords and sessions in transit; its check proves only that the browser opening its link reached the panel.
-- Beta.4 needs its own exact-JAR Paper and authenticated operator walkthrough results. Beta.3 results remain historical and are not carried forward as beta.4 passes.
+- The unchanged beta.4 JAR passed automated live checks on Paper 1.18.2, 1.21.11, 26.2, and experimental 26.3 in direct online and offline modes. The authenticated operator walkthrough remains the publication gate; beta.3 results remain separate history.
 
 ## 1.0.0-beta.3 — public beta release
 

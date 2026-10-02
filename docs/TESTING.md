@@ -2,7 +2,22 @@
 
 ## Guided setup 1.0.0-beta.4 candidate
 
-Beta.4 adds an operator setup guide and an opt-in public HTTP listener. The beta.3 hash and results below remain historical; they do **not** qualify the changed beta.4 JAR. Record the frozen beta.4 SHA-512, source revision, Paper build, Java runtime, individual outcomes, and server logs in the parent workspace before claiming compatibility or publishing.
+Beta.4 adds an operator setup guide and an opt-in public HTTP listener. The frozen candidate is `testing/notabackdoor/candidates/NotABackdoor-beta.4-502b805f3781.jar` in the parent workspace, built from source revision `7dd68184181f9a11bcc23e40c1eca6b1883f33eb`. Its SHA-512 is:
+
+```text
+502b805f3781efb4b72a6eb0c1c6e7a58e9626b922639f9b2e86cc70a75e6b0cb4a05571ccff777a612538237d47920e747ed8f34171b45a9335cf06647d9208
+```
+
+The beta.3 hash and results below remain historical; they do **not** qualify this changed beta.4 JAR. The exact beta.4 JAR passed two startup rounds on each pinned Paper build in both direct online and offline modes. Each round ran the full panel probe plus beta.4 access checks; all test worlds were retained and servers stopped. Paper 26.3 remains experimental.
+
+| Minecraft | Paper build | Java | Offline | Online |
+| --- | ---: | ---: | --- | --- |
+| 1.18.2 | 388 | 17 | Pass | Pass |
+| 1.21.11 | 132 | 21 | Pass | Pass |
+| 26.2 | 129 | 25 | Pass | Pass |
+| 26.3 (experimental) | 140 | 25 | Pass | Pass |
+
+Machine-readable receipts and `testing/notabackdoor/live-beta4/20261002-beta4-502b805f3781/report.md` are stored locally in the parent workspace. On Linux with Java 17, all **33 Maven tests passed with none skipped**. Headless Edge passed first-run password creation, login, plain-HTTP warning, and frozen HTML/CSS/JS asset checks with no page errors. The authenticated LianJordaan OP walkthrough is still pending; automated online-mode startup does not prove a real account joined or used the guide. Beta.4 has not been published yet.
 
 Run automated authentication, menu, configuration, HTTP, browser, and restart checks first. In particular, verify that two permitted operators receive the same unexpired 15-minute first-run code; five invalid setup attempts from one source do not invalidate another source's valid code; only the console can reset an existing password; offline-mode operators cannot issue codes or change access; and loss of OP or `notabackdoor.admin` permission blocks commands and menu clicks. Test shift-click, drag, number-key, double-click, and bottom-inventory interactions while the guide is open.
 
