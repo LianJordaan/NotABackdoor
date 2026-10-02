@@ -2,9 +2,9 @@
 
 A small web panel that runs inside a Paper server. It is for server owners who need to edit a configuration, look at a log, or moderate a player without navigating a full hosting control panel.
 
-The publicly listed `1.0.0-beta.3` release provides the localhost panel and browser interface. The source now prepares a combined `1.0.0-beta.4` candidate with the in-game setup guide, opt-in public HTTP, a full Minecraft console, performance history, backup progress, and bulk file actions. A panel UI fix changed the JAR after the previous candidate passed its [four-version Paper matrix and user-confirmed walkthrough](docs/TESTING.md#historical-combined-panel-and-setup-100-beta4-candidate). The [current candidate](docs/TESTING.md#current-combined-panel-and-setup-100-beta4-candidate) passed its own four-version Paper matrix and Java 17 checks. LianJordaan also reported that the final candidate's direct online-mode setup walkthrough, Console Reload, and backup worked; that manual report is separate from automated evidence. The candidate has not yet been published. The [experimental outbound relay connector](relay/README.md) is not part of its supported setup.
+The [published 1.0.0-beta.4 release](https://modrinth.com/plugin/notabackdoor/version/VxLRdFSS) adds an in-game setup guide, opt-in public HTTP, the full Minecraft console, performance history, backup progress, and bulk file actions. Its [exact JAR](docs/TESTING.md#published-combined-panel-and-setup-100-beta4) passed checks on four pinned Paper releases and Java 17 tests. On a direct online-mode server, LianJordaan confirmed that setup, Console Reload, and a backup worked; the authenticated join is corroborated by a redacted server log, while the menu and browser outcomes are the player's report. The [experimental outbound relay connector](relay/README.md) is not part of the supported setup.
 
-![Desktop overview of the currently published beta.3 panel](docs/screenshots/overview-desktop.png)
+![Desktop overview captured from the earlier beta.3 panel](docs/screenshots/overview-desktop.png)
 
 [See the file editor, Backups screen, and mobile views](docs/TESTING.md#browser-checks-and-screenshots).
 
@@ -51,6 +51,6 @@ The console reads `logs/latest.log` and keeps at most 1,000 rendered lines in th
 
 ## Development
 
-Build with `mvn package`; run checks with `mvn test`. The shaded candidate JAR is `target/NotABackdoor-1.0.0-beta.4.jar`. Java sources target 17; the API baseline is Paper 1.18.2. Browser assets live in `src/main/resources/panel/`, separate from the HTTP, file, authentication, backup, and relay services.
+Build with `mvn package`; run checks with `mvn test`. The shaded JAR is `target/NotABackdoor-1.0.0-beta.4.jar`. Java sources target 17; the API baseline is Paper 1.18.2. Browser assets live in `src/main/resources/panel/`, separate from the HTTP, file, authentication, backup, and relay services.
 
 The old implementation and pages were removed because several file endpoints could escape the intended directory and one handler ignored an authentication return value. The replacement has no route to those handlers.

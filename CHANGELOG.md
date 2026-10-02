@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.0.0-beta.4 — combined panel and setup candidate
+## 1.0.0-beta.4 — combined panel and setup release
 
 - Replaced the console's partial logger capture with a live view of Minecraft's `logs/latest.log`, including startup output. Added incremental cursors, log rotation handling, a follow-output control, and bounded browser rendering.
 - Fixed console refresh requests that arrived during an in-flight log fetch, and kept backup progress in sync while the Backups page stays open.
@@ -11,7 +11,7 @@
 - On direct online-mode servers, permitted operators can share one unexpired 15-minute first-run code. On offline-mode servers and Velocity backends, code issuance and access changes remain console-only. Password resets remain console-only everywhere.
 - Added explicit public HTTP access with a warning and exact advertised `http://host:port` address, alongside the default localhost mode. Changing modes restarts only the panel listener, revokes sessions and pending setup codes, and restores the prior listener and settings if the new one fails.
 - Added versioned access settings, source-specific first-run attempt limits, exact public Host/Origin checks, and a short-lived browser connection check. The browser warns that public HTTP exposes passwords and sessions in transit; its check proves only that the browser opening its link reached the panel.
-- The current UI-fix JAR passed two exact-JAR startup rounds in both direct online and offline modes on Paper 1.18.2, 1.21.11, 26.2, and experimental 26.3. Its Linux Java 17 suite passed 47/47 tests. LianJordaan reported that the final candidate's direct online-mode setup walkthrough, Console Reload, and backup worked. This manual confirmation is separate from the automated checks and the previous combined JAR's test history.
+- The published JAR passed two exact-JAR startup rounds in both direct online and offline modes on Paper 1.18.2, 1.21.11, 26.2, and experimental 26.3. Its Linux Java 17 suite passed 47/47 tests. LianJordaan reported that its direct online-mode setup walkthrough, Console Reload, and backup worked. A redacted server log corroborates the authenticated join; menu and browser outcomes remain user-confirmed.
 
 ## 1.0.0-beta.3 — public beta release
 

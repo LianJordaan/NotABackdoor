@@ -1,8 +1,8 @@
 # NotABackdoor exact-JAR test record
 
-## Current combined panel and setup 1.0.0-beta.4 candidate
+## Published combined panel and setup 1.0.0-beta.4
 
-The current frozen candidate is `testing/notabackdoor/candidates/NotABackdoor-beta.4-b979de793c65.jar` in the parent workspace, built from source revision `01bfe604d5560a562eafe0e8125bb56419fcc1e4`. Its SHA-512 is:
+The [published Modrinth version VxLRdFSS](https://modrinth.com/plugin/notabackdoor/version/VxLRdFSS) contains the frozen JAR `testing/notabackdoor/candidates/NotABackdoor-beta.4-b979de793c65.jar` in the parent workspace, built from source revision `01bfe604d5560a562eafe0e8125bb56419fcc1e4`. Modrinth reports the same SHA-512 as the local JAR:
 
 ```text
 b979de793c659abdd3d5a5cd23dbdbd9246a49cc0212d4883ed665014112bea5397af384ff6b1c72298e00846600cffede2d204a6323aca2d2890427cdb3b1e9
@@ -17,7 +17,9 @@ This JAR keeps the console, metrics, backup progress, bulk file actions, and in-
 | 26.2 | 129 | 25 | Pass | Pass |
 | 26.3 (experimental) | 140 | 25 | Pass | Pass |
 
-On Linux ext4 with Java 17, all **47 Maven tests passed with none skipped**. Node's syntax check passed against `panel/app.js` inside this exact JAR. LianJordaan reported on 2026-10-02 that the final candidate's direct online-mode setup walkthrough, Console Reload, and backup all worked. This is a user-confirmed manual result for the current hash, separate from the automated matrix and from confirmation of the earlier combined JAR. The automated matrix did not observe the browser interface or authenticate a Minecraft client; a browser visual review is not independently verified in this environment. Paper 26.3 is experimental.
+The published version lists the `paper` loader and exactly Minecraft 1.18.2, 1.21.11, 26.2, and 26.3.
+
+On Linux ext4 with Java 17, all **47 Maven tests passed with none skipped**. Node's syntax check passed against `panel/app.js` inside this exact JAR. LianJordaan reported on 2026-10-02 that the published JAR's direct online-mode setup walkthrough, Console Reload, and backup all worked. The local `testing/notabackdoor/live-beta4-combined/20261002-beta4-combined-full-b979de793c65/manual-op-walkthrough.json` receipt records the matching installed SHA-512; a redacted server log corroborates the authenticated join, and the password file exists. Menu and browser outcomes are user-confirmed rather than independently observed. The automated matrix did not authenticate a Minecraft client, and a browser visual review was not independently verified in this environment. Paper 26.3 is experimental.
 
 ## Historical combined panel and setup 1.0.0-beta.4 candidate
 
