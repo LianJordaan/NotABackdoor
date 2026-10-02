@@ -37,8 +37,18 @@ public final class NotABackdoorPlugin extends JavaPlugin {
             // Bukkit's world container can be a custom subdirectory. The server process
             // directory contains plugins/, server.properties, and other panel files.
             PanelFiles files = new PanelFiles(Path.of("").toAbsolutePath());
-            panel = new PanelServer(this, auth, files, port);
-            panel.start();
+            try {
+                panel = new PanelServer(this, auth, files, port);
+                panel.start();
+            } catch (Exception startup) {
+                if (panel != null) {
+                    panel.close();
+                    panel = null;
+                } else {
+                    files.close();
+                }
+                throw startup;
+            }
             getLogger().info("Panel listening at http://127.0.0.1:" + port + "/");
             if (!auth.isConfigured()) {
                 getLogger().info("Run 'nab setup' from the server console to create the first panel password.");

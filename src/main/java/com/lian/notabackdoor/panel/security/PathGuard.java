@@ -2,10 +2,10 @@ package com.lian.notabackdoor.panel.security;
 
 import java.io.IOException;
 import java.nio.file.Files;
-import java.nio.file.LinkOption;
 import java.nio.file.Path;
+import java.util.List;
 
-/** Constrains panel file actions to the selected server directory. */
+/** Validates relative path syntax without exposing a check-then-reopen path API. */
 public final class PathGuard {
     private final Path root;
 
@@ -20,44 +20,22 @@ public final class PathGuard {
         return root;
     }
 
-    public Path resolve(String relative) throws IOException {
-        if (relative == null || relative.isEmpty()) {
-            return root;
-        }
+    /** Syntax-only validation for paths later traversed through secure directory handles. */
+    public static List<String> segments(String relative) {
+        if (relative == null || relative.isEmpty()) return List.of();
         if (relative.startsWith("/") || relative.indexOf('\\') >= 0 || relative.indexOf(':') >= 0
                 || relative.chars().anyMatch(c -> c < 32 || c == 127)) {
             throw new IllegalArgumentException("Invalid relative path");
         }
-
-        Path current = root;
-        for (String segment : relative.split("/", -1)) {
+        List<String> segments = List.of(relative.split("/", -1));
+        for (String segment : segments) {
             if (segment.isEmpty() || segment.equals(".") || segment.equals("..")
                     || segment.endsWith(".") || segment.endsWith(" ")
                     || segment.matches("(?i)(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\\..*)?")) {
                 throw new IllegalArgumentException("Invalid path segment");
             }
-            current = current.resolve(segment);
-            if (Files.isSymbolicLink(current)) {
-                throw new SecurityException("Symbolic links are not accessible from the panel");
-            }
-            if (Files.exists(current, LinkOption.NOFOLLOW_LINKS)
-                    && !current.toRealPath().startsWith(root)) {
-                throw new SecurityException("Path leaves the configured server directory");
-            }
         }
-        Path result = current.normalize();
-        if (!result.startsWith(root)) {
-            throw new SecurityException("Path leaves the configured server directory");
-        }
-        return result;
-    }
-
-    public Path resolveChild(String relative) throws IOException {
-        Path child = resolve(relative);
-        if (child.equals(root)) {
-            throw new IllegalArgumentException("This operation requires a path below the file root");
-        }
-        return child;
+        return segments;
     }
 
     public String relative(Path path) {

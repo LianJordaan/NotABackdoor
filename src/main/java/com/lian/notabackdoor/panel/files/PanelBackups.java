@@ -1,14 +1,12 @@
 package com.lian.notabackdoor.panel.files;
 
+import com.lian.notabackdoor.panel.security.PathGuard;
+
 import java.io.IOException;
-import java.io.InputStream;
-import java.nio.file.FileVisitResult;
-import java.nio.file.Files;
+import java.nio.channels.Channels;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
-import java.nio.file.SimpleFileVisitor;
-import java.nio.file.AtomicMoveNotSupportedException;
-import java.nio.file.StandardCopyOption;
+import java.nio.file.SecureDirectoryStream;
 import java.nio.file.attribute.BasicFileAttributes;
 import java.time.Clock;
 import java.time.ZoneOffset;
@@ -20,14 +18,14 @@ import java.util.concurrent.locks.ReentrantLock;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
 
-/** Server-root backup archives with bounded size and an excluded backup destination. */
-public final class PanelBackups {
+/** Bounded server-root backups that never reopen a checked pathname. */
+public final class PanelBackups implements AutoCloseable {
     private static final long MAX_BYTES = 20L * 1024 * 1024 * 1024;
     private static final int MAX_ENTRIES = 200_000;
     private static final DateTimeFormatter NAME = DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss")
             .withZone(ZoneOffset.UTC);
-    private final Path root;
-    private final Path directory;
+    private final SecureFileRoot files;
+    private final String directory;
     private final Clock clock;
     private final ReentrantLock running = new ReentrantLock();
 
@@ -36,22 +34,31 @@ public final class PanelBackups {
     }
 
     PanelBackups(Path root, Path directory, Clock clock) throws IOException {
-        this.root = root.toRealPath();
-        Files.createDirectories(directory);
-        this.directory = directory.toRealPath();
-        if (!this.directory.startsWith(this.root)) {
-            throw new IllegalArgumentException("Backups must live under the selected server root");
+        files = new SecureFileRoot(root);
+        boolean ready = false;
+        try {
+            this.directory = new PathGuard(files.rootPath()).relative(directory);
+            if (this.directory.isEmpty()) throw new IllegalArgumentException("Backups must be below the server root");
+            try (SecureFileRoot.Directory ignored = files.directoryFrom(files.root(),
+                    PathGuard.segments(this.directory), true)) {
+                // Create the private backup directory through handle-relative moves.
+            }
+            this.clock = clock;
+            ready = true;
+        } finally {
+            if (!ready) files.close();
         }
-        this.clock = clock;
     }
 
     public List<Backup> list() throws IOException {
         List<Backup> result = new ArrayList<>();
-        try (var stream = Files.newDirectoryStream(directory, "backup-*.zip")) {
-            for (Path archive : stream) {
-                if (Files.isRegularFile(archive, LinkOption.NOFOLLOW_LINKS)) {
-                    result.add(new Backup(archive.getFileName().toString(), Files.size(archive),
-                            Files.getLastModifiedTime(archive).toMillis()));
+        try (SecureFileRoot.Directory backups = files.directory(directory)) {
+            for (Path entry : backups.stream) {
+                String name = entry.getFileName().toString();
+                if (!validName(name)) continue;
+                BasicFileAttributes attributes = files.attributesOrNull(backups.stream, entry.getFileName());
+                if (attributes != null && attributes.isRegularFile() && !attributes.isSymbolicLink()) {
+                    result.add(new Backup(name, attributes.size(), attributes.lastModifiedTime().toMillis()));
                 }
             }
         }
@@ -61,87 +68,90 @@ public final class PanelBackups {
 
     public Backup create() throws IOException {
         if (!running.tryLock()) throw new IllegalStateException("A backup is already in progress");
-        try {
+        try (SecureFileRoot.Directory backups = files.directory(directory)) {
             String filename = "backup-" + NAME.format(clock.instant()) + ".zip";
-            Path destination = directory.resolve(filename);
-            if (Files.exists(destination, LinkOption.NOFOLLOW_LINKS)) {
+            Path destination = Path.of(filename);
+            if (files.attributesOrNull(backups.stream, destination) != null) {
                 throw new IllegalStateException("A backup was already created this second; retry shortly");
             }
-            Path temporary = Files.createTempFile(directory, ".nab-backup-", ".tmp");
+            SecureFileRoot.TempFile temporary = files.temporaryFile(backups.stream, ".nab-backup-");
             try {
-                try (ZipOutputStream zip = new ZipOutputStream(Files.newOutputStream(temporary))) {
-                    long[] total = {0};
-                    int[] count = {0};
-                    Files.walkFileTree(root, new SimpleFileVisitor<>() {
-                        @Override public FileVisitResult preVisitDirectory(Path folder, BasicFileAttributes attributes) throws IOException {
-                            if (folder.equals(directory)) return FileVisitResult.SKIP_SUBTREE;
-                            if (!folder.equals(root)) {
-                                if (++count[0] > MAX_ENTRIES) throw new IOException("Too many files for one backup");
-                                zip.putNextEntry(new ZipEntry(name(folder) + "/"));
-                                zip.closeEntry();
-                            }
-                            return FileVisitResult.CONTINUE;
-                        }
-                        @Override public FileVisitResult visitFile(Path file, BasicFileAttributes attributes) throws IOException {
-                            if (attributes.isSymbolicLink() || !attributes.isRegularFile()
-                                    || file.getFileName().toString().equals("session.lock")) {
-                                return FileVisitResult.CONTINUE;
-                            }
-                            if (++count[0] > MAX_ENTRIES) throw new IOException("Too many files for one backup");
-                            if (attributes.size() > MAX_BYTES - total[0]) {
-                                throw new IOException("Backup exceeded the 20 GiB limit");
-                            }
-                            zip.putNextEntry(new ZipEntry(name(file)));
-                            // A live server can append to a file after its size was checked.
-                            // Count actual copied bytes, and do not follow a replacement symlink.
-                            try (InputStream input = Files.newInputStream(file, LinkOption.NOFOLLOW_LINKS)) {
-                                byte[] buffer = new byte[64 * 1024];
-                                int read;
-                                while ((read = input.read(buffer)) != -1) {
-                                    if (read > MAX_BYTES - total[0]) {
-                                        throw new IOException("Backup exceeded the 20 GiB limit");
-                                    }
-                                    zip.write(buffer, 0, read);
-                                    total[0] += read;
-                                }
-                            }
-                            zip.closeEntry();
-                            return FileVisitResult.CONTINUE;
-                        }
-                    });
+                try (temporary; ZipOutputStream output = new ZipOutputStream(Channels.newOutputStream(temporary.channel()));
+                     SecureFileRoot.Directory sourceRoot = files.directory("")) {
+                    backupTree(sourceRoot.stream, "", output, new long[]{0}, new int[]{0});
                 }
-                try {
-                    Files.move(temporary, destination, StandardCopyOption.ATOMIC_MOVE);
-                } catch (AtomicMoveNotSupportedException unsupported) {
-                    Files.move(temporary, destination);
-                }
+                backups.stream.move(temporary.name(), backups.stream, destination);
             } finally {
-                Files.deleteIfExists(temporary);
+                if (files.attributesOrNull(backups.stream, temporary.name()) != null) {
+                    backups.stream.deleteFile(temporary.name());
+                }
             }
-            return new Backup(filename, Files.size(destination), Files.getLastModifiedTime(destination).toMillis());
+            BasicFileAttributes made = files.attributes(backups.stream, destination);
+            return new Backup(filename, made.size(), made.lastModifiedTime().toMillis());
         } finally {
             running.unlock();
         }
     }
 
-    public Path download(String name) {
-        if (name == null || !name.matches("backup-[0-9]{8}-[0-9]{6}\\.zip")) {
-            throw new IllegalArgumentException("Invalid backup name");
+    private void backupTree(SecureDirectoryStream<Path> current, String prefix, ZipOutputStream zip,
+                            long[] total, int[] count) throws IOException {
+        for (Path listed : current) {
+            Path name = listed.getFileName();
+            String relative = prefix.isEmpty() ? name.toString() : prefix + "/" + name;
+            if (relative.equals(directory) || name.toString().equals("session.lock")) continue;
+            try { PathGuard.segments(relative); }
+            catch (IllegalArgumentException unsafeName) {
+                throw new IOException("Backup source contains an unsafe file name", unsafeName);
+            }
+            BasicFileAttributes attributes = files.attributesOrNull(current, name);
+            if (attributes == null || attributes.isSymbolicLink()) continue;
+            if (++count[0] > MAX_ENTRIES) throw new IOException("Too many files for one backup");
+            if (attributes.isDirectory()) {
+                zip.putNextEntry(new ZipEntry(relative + "/"));
+                zip.closeEntry();
+                try (SecureDirectoryStream<Path> child = current.newDirectoryStream(name, LinkOption.NOFOLLOW_LINKS)) {
+                    backupTree(child, relative, zip, total, count);
+                }
+            } else if (attributes.isRegularFile()) {
+                if (attributes.size() > MAX_BYTES - total[0]) throw new IOException("Backup exceeded the 20 GiB limit");
+                zip.putNextEntry(new ZipEntry(relative));
+                try (SecureFileRoot.OpenedFile source = files.openRegularFile(current, name)) {
+                    byte[] buffer = new byte[64 * 1024];
+                    int read;
+                    var input = source.input();
+                    while ((read = input.read(buffer)) != -1) {
+                        if (read > MAX_BYTES - total[0]) throw new IOException("Backup exceeded the 20 GiB limit");
+                        zip.write(buffer, 0, read);
+                        total[0] += read;
+                    }
+                }
+                zip.closeEntry();
+            }
         }
-        Path archive = directory.resolve(name);
-        if (!Files.isRegularFile(archive, LinkOption.NOFOLLOW_LINKS)) {
-            throw new IllegalArgumentException("Backup not found");
+    }
+
+    public SecureFileRoot.OpenedFile download(String name) throws IOException {
+        if (!validName(name)) throw new IllegalArgumentException("Invalid backup name");
+        try (SecureFileRoot.Directory backups = files.directory(directory)) {
+            return files.openRegularFile(backups.stream, Path.of(name));
         }
-        return archive;
     }
 
     public void delete(String name) throws IOException {
-        Files.delete(download(name));
+        if (!validName(name)) throw new IllegalArgumentException("Invalid backup name");
+        try (SecureFileRoot.Directory backups = files.directory(directory)) {
+            BasicFileAttributes attributes = files.attributesOrNull(backups.stream, Path.of(name));
+            if (attributes == null || !attributes.isRegularFile() || attributes.isSymbolicLink()) {
+                throw new IllegalArgumentException("Backup not found");
+            }
+            backups.stream.deleteFile(Path.of(name));
+        }
     }
 
-    private String name(Path path) {
-        return root.relativize(path).toString().replace('\\', '/');
+    private static boolean validName(String name) {
+        return name != null && name.matches("backup-[0-9]{8}-[0-9]{6}\\.zip");
     }
 
+    @Override public void close() throws IOException { files.close(); }
     public record Backup(String name, long size, long createdAt) { }
 }

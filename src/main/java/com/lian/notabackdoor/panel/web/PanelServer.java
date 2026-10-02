@@ -7,6 +7,7 @@ import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
 import com.lian.notabackdoor.panel.files.PanelFiles;
 import com.lian.notabackdoor.panel.files.PanelBackups;
+import com.lian.notabackdoor.panel.files.SecureFileRoot;
 import com.lian.notabackdoor.panel.security.AuthService;
 import org.bukkit.Bukkit;
 import org.bukkit.entity.Player;
@@ -17,8 +18,6 @@ import java.io.InputStream;
 import java.net.InetSocketAddress;
 import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
-import java.nio.file.Path;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
@@ -46,9 +45,17 @@ public final class PanelServer implements AutoCloseable {
         this.plugin = plugin;
         this.auth = auth;
         this.files = files;
-        this.backups = new PanelBackups(files.root(), plugin.getDataFolder().toPath().resolve("backups"));
         this.port = port;
-        this.server = HttpServer.create(new InetSocketAddress("127.0.0.1", port), 32);
+        PanelBackups preparedBackups = new PanelBackups(files.root(), plugin.getDataFolder().toPath().resolve("backups"));
+        HttpServer preparedServer;
+        try {
+            preparedServer = HttpServer.create(new InetSocketAddress("127.0.0.1", port), 32);
+        } catch (IOException | RuntimeException failure) {
+            preparedBackups.close();
+            throw failure;
+        }
+        this.backups = preparedBackups;
+        this.server = preparedServer;
         this.workers = Executors.newFixedThreadPool(4, task -> {
             Thread thread = new Thread(task, "notabackdoor-panel");
             thread.setDaemon(true);
@@ -68,6 +75,8 @@ public final class PanelServer implements AutoCloseable {
         server.stop(1);
         logs.close();
         workers.shutdownNow();
+        try { backups.close(); } catch (IOException error) { plugin.getLogger().warning("Could not close backup handles: " + error.getMessage()); }
+        try { files.close(); } catch (IOException error) { plugin.getLogger().warning("Could not close file handles: " + error.getMessage()); }
     }
 
     private void handle(HttpExchange exchange) throws IOException {
@@ -349,11 +358,13 @@ public final class PanelServer implements AutoCloseable {
         json(exchange, status, Map.of("error", message == null ? "Request failed" : message));
     }
 
-    private static void download(HttpExchange exchange, Path source) throws IOException {
-        String safeName = source.getFileName().toString().replaceAll("[^A-Za-z0-9._-]", "_");
-        exchange.getResponseHeaders().set("Content-Type", "application/octet-stream");
-        exchange.getResponseHeaders().set("Content-Disposition", "attachment; filename=\"" + safeName + "\"");
-        exchange.sendResponseHeaders(200, Files.size(source));
-        Files.copy(source, exchange.getResponseBody());
+    private static void download(HttpExchange exchange, SecureFileRoot.OpenedFile source) throws IOException {
+        try (source) {
+            String safeName = source.name().replaceAll("[^A-Za-z0-9._-]", "_");
+            exchange.getResponseHeaders().set("Content-Type", "application/octet-stream");
+            exchange.getResponseHeaders().set("Content-Disposition", "attachment; filename=\"" + safeName + "\"");
+            exchange.sendResponseHeaders(200, 0);
+            source.input().transferTo(exchange.getResponseBody());
+        }
     }
 }

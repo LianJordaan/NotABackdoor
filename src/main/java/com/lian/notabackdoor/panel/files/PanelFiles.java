@@ -6,16 +6,14 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.nio.ByteBuffer;
+import java.nio.channels.Channels;
 import java.nio.charset.CharacterCodingException;
-import java.nio.charset.StandardCharsets;
 import java.nio.charset.CodingErrorAction;
-import java.nio.file.AtomicMoveNotSupportedException;
-import java.nio.file.FileVisitResult;
-import java.nio.file.Files;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
-import java.nio.file.SimpleFileVisitor;
-import java.nio.file.StandardCopyOption;
+import java.nio.file.SecureDirectoryStream;
+import java.nio.file.StandardOpenOption;
 import java.nio.file.attribute.BasicFileAttributes;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
@@ -24,48 +22,40 @@ import java.util.Comparator;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.Objects;
+import java.util.Set;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
 import java.util.zip.ZipOutputStream;
 
-/** Bounded, server-root-scoped file operations. No path supplied by a browser is used directly. */
-public final class PanelFiles {
+/** Bounded server-root file operations performed through race-safe directory handles. */
+public final class PanelFiles implements AutoCloseable {
     public static final long MAX_TEXT_BYTES = 2L * 1024 * 1024;
     public static final long MAX_UPLOAD_BYTES = 128L * 1024 * 1024;
     private static final long MAX_EXPANDED_BYTES = 1024L * 1024 * 1024;
     private static final int MAX_ARCHIVE_ENTRIES = 20_000;
     private static final int MAX_LIST_ENTRIES = 2_000;
-    private final PathGuard guard;
+    private final SecureFileRoot files;
 
-    public PanelFiles(Path root) throws IOException {
-        guard = new PathGuard(root);
-    }
-
-    public Path root() {
-        return guard.root();
-    }
-
-    public Path guarded(String path) throws IOException {
-        return guard.resolve(path);
-    }
+    public PanelFiles(Path root) throws IOException { files = new SecureFileRoot(root); }
+    public Path root() { return files.rootPath(); }
+    @Override public void close() throws IOException { files.close(); }
 
     public List<Entry> list(String directory) throws IOException {
-        Path target = guard.resolve(directory);
-        if (!Files.isDirectory(target, LinkOption.NOFOLLOW_LINKS)) {
-            throw new IllegalArgumentException("Not a directory");
-        }
         List<Entry> entries = new ArrayList<>();
-        try (var stream = Files.newDirectoryStream(target)) {
-            for (Path child : stream) {
+        try (SecureFileRoot.Directory opened = files.directory(directory)) {
+            for (Path child : opened.stream) {
                 if (entries.size() >= MAX_LIST_ENTRIES) {
                     throw new IllegalArgumentException("This directory has too many entries to display");
                 }
-                if (Files.isSymbolicLink(child)) {
-                    continue;
-                }
-                boolean folder = Files.isDirectory(child, LinkOption.NOFOLLOW_LINKS);
-                entries.add(new Entry(child.getFileName().toString(), guard.relative(child), folder,
-                        folder ? 0 : Files.size(child), Files.getLastModifiedTime(child).toMillis()));
+                Path name = child.getFileName();
+                BasicFileAttributes attributes = files.attributesOrNull(opened.stream, name);
+                if (attributes == null || attributes.isSymbolicLink()) continue;
+                String path = directory.isEmpty() ? name.toString() : directory + "/" + name;
+                try { PathGuard.segments(path); }
+                catch (IllegalArgumentException unsafeName) { continue; }
+                entries.add(new Entry(name.toString(), path, attributes.isDirectory(),
+                        attributes.isDirectory() ? 0 : attributes.size(),
+                        attributes.lastModifiedTime().toMillis()));
             }
         }
         entries.sort(Comparator.comparing(Entry::directory).reversed()
@@ -74,8 +64,10 @@ public final class PanelFiles {
     }
 
     public TextFile readText(String path) throws IOException {
-        Path target = existingFile(path);
-        byte[] bytes = limitedRead(target, MAX_TEXT_BYTES);
+        byte[] bytes;
+        try (SecureFileRoot.OpenedFile file = files.openRegularFile(path)) {
+            bytes = readBounded(file.input(), MAX_TEXT_BYTES);
+        }
         String content;
         try {
             content = StandardCharsets.UTF_8.newDecoder().onMalformedInput(CodingErrorAction.REPORT)
@@ -87,187 +79,204 @@ public final class PanelFiles {
     }
 
     public synchronized TextFile writeText(String path, String content, String expectedSha256) throws IOException {
-        Path target = guard.resolveChild(path);
         Objects.requireNonNull(content, "content");
         byte[] bytes = content.getBytes(StandardCharsets.UTF_8);
-        if (bytes.length > MAX_TEXT_BYTES) {
-            throw new IllegalArgumentException("Text files are limited to 2 MiB");
-        }
-        if (!Files.isRegularFile(target, LinkOption.NOFOLLOW_LINKS)) {
-            throw new IllegalArgumentException("File does not exist");
-        }
-        String currentHash = sha256(limitedRead(target, MAX_TEXT_BYTES));
-        if (!currentHash.equalsIgnoreCase(Objects.requireNonNull(expectedSha256, "expectedSha256"))) {
-            throw new ConflictException("The file changed since it was opened. Reload before saving.");
-        }
-        Path temporary = Files.createTempFile(target.getParent(), ".nab-edit-", ".tmp");
-        try {
-            Files.write(temporary, bytes);
-            moveAtomic(temporary, target, true);
-        } finally {
-            Files.deleteIfExists(temporary);
+        if (bytes.length > MAX_TEXT_BYTES) throw new IllegalArgumentException("Text files are limited to 2 MiB");
+        try (SecureFileRoot.Leaf target = files.leaf(path)) {
+            byte[] current;
+            try (SecureFileRoot.OpenedFile opened = files.openRegularFile(target.parent.stream, target.name)) {
+                current = readBounded(opened.input(), MAX_TEXT_BYTES);
+            }
+            if (!sha256(current).equalsIgnoreCase(Objects.requireNonNull(expectedSha256, "expectedSha256"))) {
+                throw new ConflictException("The file changed since it was opened. Reload before saving.");
+            }
+            SecureFileRoot.TempFile temporary = files.temporaryFile(target.parent.stream, ".nab-edit-");
+            try {
+                try (temporary) { writeAll(temporary.channel(), bytes); }
+                target.parent.stream.move(temporary.name(), target.parent.stream, target.name);
+            } finally {
+                if (files.attributesOrNull(target.parent.stream, temporary.name()) != null) {
+                    target.parent.stream.deleteFile(temporary.name());
+                }
+            }
         }
         return new TextFile(content, sha256(bytes));
     }
 
     public synchronized void create(String path, boolean directory) throws IOException {
-        Path target = guard.resolveChild(path);
-        if (!Files.isDirectory(target.getParent(), LinkOption.NOFOLLOW_LINKS)) {
-            throw new IllegalArgumentException("Parent directory does not exist");
-        }
-        if (directory) {
-            Files.createDirectory(target);
-        } else {
-            Files.createFile(target);
+        try (SecureFileRoot.Leaf target = files.leaf(path)) {
+            if (files.attributesOrNull(target.parent.stream, target.name) != null) {
+                throw new IllegalArgumentException("Destination occupied");
+            }
+            if (directory) files.createDirectory(target.parent.stream, target.name);
+            else try (var ignored = target.parent.stream.newByteChannel(target.name,
+                    Set.of(StandardOpenOption.WRITE, StandardOpenOption.CREATE_NEW, LinkOption.NOFOLLOW_LINKS))) {
+                // Creating the file is the entire operation.
+            }
         }
     }
 
     public synchronized void move(String from, String to) throws IOException {
-        Path source = guard.resolveChild(from);
-        Path target = guard.resolveChild(to);
-        if (target.startsWith(source)) {
+        List<String> sourceSegments = PathGuard.segments(from);
+        List<String> targetSegments = PathGuard.segments(to);
+        if (sourceSegments.isEmpty() || targetSegments.isEmpty()) {
+            throw new IllegalArgumentException("A path below the file root is required");
+        }
+        if (targetSegments.size() >= sourceSegments.size()
+                && targetSegments.subList(0, sourceSegments.size()).equals(sourceSegments)) {
             throw new IllegalArgumentException("A folder cannot be moved into itself");
         }
-        if (!Files.exists(source, LinkOption.NOFOLLOW_LINKS)
-                || Files.exists(target, LinkOption.NOFOLLOW_LINKS)
-                || !Files.isDirectory(target.getParent(), LinkOption.NOFOLLOW_LINKS)) {
-            throw new IllegalArgumentException("Source missing, destination occupied, or parent missing");
+        try (SecureFileRoot.Leaf source = files.leaf(from); SecureFileRoot.Leaf target = files.leaf(to)) {
+            BasicFileAttributes existing = files.attributesOrNull(source.parent.stream, source.name);
+            if (existing == null || existing.isSymbolicLink()
+                    || files.attributesOrNull(target.parent.stream, target.name) != null) {
+                throw new IllegalArgumentException("Source missing or destination occupied");
+            }
+            source.parent.stream.move(source.name, target.parent.stream, target.name);
         }
-        moveAtomic(source, target, false);
     }
 
     public synchronized void delete(String path) throws IOException {
-        Path target = guard.resolveChild(path);
-        if (!Files.exists(target, LinkOption.NOFOLLOW_LINKS)) {
-            throw new IllegalArgumentException("Path does not exist");
+        try (SecureFileRoot.Leaf target = files.leaf(path)) {
+            BasicFileAttributes existing = files.attributesOrNull(target.parent.stream, target.name);
+            if (existing == null) throw new IllegalArgumentException("Path does not exist");
+            if (existing.isSymbolicLink()) throw new SecurityException("Symbolic links are not accessible from the panel");
+            files.deleteTree(target.parent.stream, target.name);
         }
-        Files.walkFileTree(target, new SimpleFileVisitor<>() {
-            @Override public FileVisitResult visitFile(Path file, BasicFileAttributes attributes) throws IOException {
-                Files.delete(file);
-                return FileVisitResult.CONTINUE;
-            }
-            @Override public FileVisitResult postVisitDirectory(Path directory, IOException error) throws IOException {
-                if (error != null) throw error;
-                Files.delete(directory);
-                return FileVisitResult.CONTINUE;
-            }
-        });
     }
 
-    public Path download(String path) throws IOException {
-        return existingFile(path);
+    public SecureFileRoot.OpenedFile download(String path) throws IOException {
+        return files.openRegularFile(path);
     }
 
     public synchronized void upload(String path, InputStream body) throws IOException {
-        Path target = guard.resolveChild(path);
-        if (Files.exists(target, LinkOption.NOFOLLOW_LINKS)
-                || !Files.isDirectory(target.getParent(), LinkOption.NOFOLLOW_LINKS)) {
-            throw new IllegalArgumentException("Destination occupied or parent missing");
-        }
-        Path temporary = Files.createTempFile(target.getParent(), ".nab-upload-", ".tmp");
-        try {
-            try (OutputStream output = Files.newOutputStream(temporary)) {
-                copyBounded(body, output, MAX_UPLOAD_BYTES);
+        try (SecureFileRoot.Leaf target = files.leaf(path)) {
+            if (files.attributesOrNull(target.parent.stream, target.name) != null) {
+                throw new IllegalArgumentException("Destination occupied");
             }
-            moveAtomic(temporary, target, false);
-        } finally {
-            Files.deleteIfExists(temporary);
+            SecureFileRoot.TempFile temporary = files.temporaryFile(target.parent.stream, ".nab-upload-");
+            try {
+                try (temporary; OutputStream output = Channels.newOutputStream(temporary.channel())) {
+                    copyBounded(body, output, MAX_UPLOAD_BYTES);
+                }
+                target.parent.stream.move(temporary.name(), target.parent.stream, target.name);
+            } finally {
+                if (files.attributesOrNull(target.parent.stream, temporary.name()) != null) {
+                    target.parent.stream.deleteFile(temporary.name());
+                }
+            }
         }
     }
 
     public synchronized void zip(String sourcePath, String archivePath) throws IOException {
-        Path source = guard.resolveChild(sourcePath);
-        Path archive = guard.resolveChild(archivePath);
-        if (!Files.exists(source, LinkOption.NOFOLLOW_LINKS) || Files.isSymbolicLink(source)
-                || Files.exists(archive, LinkOption.NOFOLLOW_LINKS)
-                || archive.startsWith(source)) {
-            throw new IllegalArgumentException("Invalid archive source or destination");
+        List<String> sourceSegments = PathGuard.segments(sourcePath);
+        List<String> archiveSegments = PathGuard.segments(archivePath);
+        if (sourceSegments.isEmpty() || archiveSegments.isEmpty()) {
+            throw new IllegalArgumentException("A path below the file root is required");
         }
-        Path temporary = Files.createTempFile(archive.getParent(), ".nab-zip-", ".tmp");
-        try {
-            try (ZipOutputStream zip = new ZipOutputStream(Files.newOutputStream(temporary))) {
-                int[] count = {0};
-                long[] total = {0};
-                Path parent = source.getParent();
-                Files.walkFileTree(source, new SimpleFileVisitor<>() {
-                    @Override public FileVisitResult preVisitDirectory(Path directory, BasicFileAttributes attributes) throws IOException {
-                        if (++count[0] > MAX_ARCHIVE_ENTRIES) throw new IOException("Archive has too many entries");
-                        zip.putNextEntry(new ZipEntry(parent.relativize(directory).toString().replace('\\', '/') + "/"));
-                        zip.closeEntry();
-                        return FileVisitResult.CONTINUE;
-                    }
-                    @Override public FileVisitResult visitFile(Path file, BasicFileAttributes attributes) throws IOException {
-                        if (!attributes.isRegularFile() || attributes.isSymbolicLink()) return FileVisitResult.CONTINUE;
-                        if (++count[0] > MAX_ARCHIVE_ENTRIES) throw new IOException("Archive has too many entries");
-                        if (attributes.size() > MAX_EXPANDED_BYTES - total[0]) {
-                            throw new IOException("Archive source exceeded the 1 GiB limit");
-                        }
-                        zip.putNextEntry(new ZipEntry(parent.relativize(file).toString().replace('\\', '/')));
-                        try (InputStream input = Files.newInputStream(file)) {
-                            total[0] += copyBounded(input, zip, MAX_EXPANDED_BYTES - total[0]);
-                        }
-                        zip.closeEntry();
-                        return FileVisitResult.CONTINUE;
-                    }
-                });
+        if (archiveSegments.size() >= sourceSegments.size()
+                && archiveSegments.subList(0, sourceSegments.size()).equals(sourceSegments)) {
+            throw new IllegalArgumentException("An archive cannot be placed inside its source");
+        }
+        try (SecureFileRoot.Leaf source = files.leaf(sourcePath);
+             SecureFileRoot.Leaf archive = files.leaf(archivePath)) {
+            BasicFileAttributes existing = files.attributesOrNull(source.parent.stream, source.name);
+            if (existing == null || existing.isSymbolicLink()
+                    || files.attributesOrNull(archive.parent.stream, archive.name) != null) {
+                throw new IllegalArgumentException("Invalid archive source or destination");
             }
-            moveAtomic(temporary, archive, false);
-        } finally {
-            Files.deleteIfExists(temporary);
+            SecureFileRoot.TempFile temporary = files.temporaryFile(archive.parent.stream, ".nab-zip-");
+            try {
+                try (temporary; ZipOutputStream output = new ZipOutputStream(Channels.newOutputStream(temporary.channel()))) {
+                    zipEntry(source.parent.stream, source.name, source.name.toString(), output,
+                            new long[]{0}, new int[]{0});
+                }
+                archive.parent.stream.move(temporary.name(), archive.parent.stream, archive.name);
+            } finally {
+                if (files.attributesOrNull(archive.parent.stream, temporary.name()) != null) {
+                    archive.parent.stream.deleteFile(temporary.name());
+                }
+            }
+        }
+    }
+
+    private void zipEntry(SecureDirectoryStream<Path> parent, Path name, String entryName,
+                          ZipOutputStream output, long[] total, int[] count) throws IOException {
+        BasicFileAttributes attributes = files.attributesOrNull(parent, name);
+        if (attributes == null || attributes.isSymbolicLink()) return;
+        if (++count[0] > MAX_ARCHIVE_ENTRIES) throw new IOException("Archive has too many entries");
+        if (attributes.isDirectory()) {
+            output.putNextEntry(new ZipEntry(entryName + "/"));
+            output.closeEntry();
+            try (SecureDirectoryStream<Path> directory = parent.newDirectoryStream(name, LinkOption.NOFOLLOW_LINKS)) {
+                for (Path child : directory) {
+                    Path childName = child.getFileName();
+                    try { PathGuard.segments(childName.toString()); }
+                    catch (IllegalArgumentException unsafeName) { throw new IOException("Archive source contains an unsafe name", unsafeName); }
+                    zipEntry(directory, childName, entryName + "/" + childName, output, total, count);
+                }
+            }
+        } else if (attributes.isRegularFile()) {
+            if (attributes.size() > MAX_EXPANDED_BYTES - total[0]) {
+                throw new IOException("Archive source exceeded the 1 GiB limit");
+            }
+            output.putNextEntry(new ZipEntry(entryName));
+            try (SecureFileRoot.OpenedFile opened = files.openRegularFile(parent, name)) {
+                total[0] += copyBounded(opened.input(), output, MAX_EXPANDED_BYTES - total[0]);
+            }
+            output.closeEntry();
         }
     }
 
     public synchronized void unzip(String archivePath, String destinationPath) throws IOException {
-        Path archive = existingFile(archivePath);
-        Path destination = guard.resolveChild(destinationPath);
-        if (Files.exists(destination, LinkOption.NOFOLLOW_LINKS)
-                || !Files.isDirectory(destination.getParent(), LinkOption.NOFOLLOW_LINKS)) {
-            throw new IllegalArgumentException("Extraction destination must be a new directory");
-        }
-        Path staging = Files.createTempDirectory(destination.getParent(), ".nab-extract-");
-        boolean completed = false;
-        try {
-            PathGuard stageGuard = new PathGuard(staging);
-            long total = 0;
-            int count = 0;
-            try (ZipInputStream zip = new ZipInputStream(Files.newInputStream(archive))) {
-                ZipEntry entry;
-                while ((entry = zip.getNextEntry()) != null) {
-                    if (++count > MAX_ARCHIVE_ENTRIES) throw new IOException("Archive has too many entries");
-                    String name = entry.getName();
-                    if (name.endsWith("/")) name = name.substring(0, name.length() - 1);
-                    if (name.isEmpty()) continue;
-                    Path output = stageGuard.resolveChild(name);
-                    if (entry.isDirectory()) {
-                        Files.createDirectories(output);
-                    } else {
-                        Files.createDirectories(output.getParent());
-                        try (OutputStream file = Files.newOutputStream(output,
-                                java.nio.file.StandardOpenOption.CREATE_NEW)) {
-                            total += copyBounded(zip, file, MAX_EXPANDED_BYTES - total);
-                        }
-                    }
-                    zip.closeEntry();
-                }
+        try (SecureFileRoot.OpenedFile archive = files.openRegularFile(archivePath);
+             SecureFileRoot.Leaf destination = files.leaf(destinationPath)) {
+            if (files.attributesOrNull(destination.parent.stream, destination.name) != null) {
+                throw new IllegalArgumentException("Extraction destination must be a new directory");
             }
-            moveAtomic(staging, destination, false);
-            completed = true;
-        } finally {
-            if (!completed) deleteTree(staging);
+            Path stagingName = files.createStagingDirectory(".nab-extract-");
+            boolean completed = false;
+            try {
+                try (SecureDirectoryStream<Path> staging = files.root().newDirectoryStream(
+                        stagingName, LinkOption.NOFOLLOW_LINKS);
+                     ZipInputStream zip = new ZipInputStream(archive.input())) {
+                    long total = 0;
+                    int count = 0;
+                    ZipEntry entry;
+                    while ((entry = zip.getNextEntry()) != null) {
+                        if (++count > MAX_ARCHIVE_ENTRIES) throw new IOException("Archive has too many entries");
+                        String name = entry.getName();
+                        if (name.endsWith("/")) name = name.substring(0, name.length() - 1);
+                        if (name.isEmpty()) continue;
+                        List<String> segments = PathGuard.segments(name);
+                        int parentCount = entry.isDirectory() ? segments.size() : segments.size() - 1;
+                        try (SecureFileRoot.Directory parent = files.directoryFrom(
+                                staging, segments.subList(0, parentCount), true)) {
+                            if (!entry.isDirectory()) {
+                                Path leaf = Path.of(segments.get(segments.size() - 1));
+                                try (var channel = parent.stream.newByteChannel(leaf,
+                                        Set.of(StandardOpenOption.WRITE, StandardOpenOption.CREATE_NEW,
+                                                LinkOption.NOFOLLOW_LINKS));
+                                     OutputStream output = Channels.newOutputStream(channel)) {
+                                    total += copyBounded(zip, output, MAX_EXPANDED_BYTES - total);
+                                }
+                            }
+                        }
+                        zip.closeEntry();
+                    }
+                }
+                files.root().move(stagingName, destination.parent.stream, destination.name);
+                completed = true;
+            } finally {
+                if (!completed) files.deleteTree(files.root(), stagingName);
+            }
         }
     }
 
-    private Path existingFile(String path) throws IOException {
-        Path target = guard.resolveChild(path);
-        if (!Files.isRegularFile(target, LinkOption.NOFOLLOW_LINKS)) {
-            throw new IllegalArgumentException("Not a regular file");
-        }
-        return target;
-    }
-
-    private static byte[] limitedRead(Path target, long limit) throws IOException {
-        if (Files.size(target) > limit) throw new IllegalArgumentException("File is too large");
-        return Files.readAllBytes(target);
+    private static byte[] readBounded(InputStream input, long limit) throws IOException {
+        byte[] bytes = input.readNBytes(Math.toIntExact(limit + 1));
+        if (bytes.length > limit) throw new IllegalArgumentException("File is too large");
+        return bytes;
     }
 
     private static long copyBounded(InputStream source, OutputStream target, long limit) throws IOException {
@@ -276,43 +285,20 @@ public final class PanelFiles {
         int read;
         while ((read = source.read(buffer)) != -1) {
             total += read;
-            if (total > limit) throw new IllegalArgumentException("Transfer exceeds the size limit");
+            if (total > limit) throw new IOException("Transfer exceeds the size limit");
             target.write(buffer, 0, read);
         }
         return total;
     }
 
+    private static void writeAll(java.nio.channels.SeekableByteChannel channel, byte[] bytes) throws IOException {
+        ByteBuffer buffer = ByteBuffer.wrap(bytes);
+        while (buffer.hasRemaining()) channel.write(buffer);
+    }
+
     private static String sha256(byte[] data) {
-        try {
-            return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(data));
-        } catch (NoSuchAlgorithmException impossible) {
-            throw new IllegalStateException(impossible);
-        }
-    }
-
-    private static void moveAtomic(Path source, Path destination, boolean replace) throws IOException {
-        try {
-            if (replace) Files.move(source, destination, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
-            else Files.move(source, destination, StandardCopyOption.ATOMIC_MOVE);
-        } catch (AtomicMoveNotSupportedException unsupported) {
-            if (replace) Files.move(source, destination, StandardCopyOption.REPLACE_EXISTING);
-            else Files.move(source, destination);
-        }
-    }
-
-    private static void deleteTree(Path root) throws IOException {
-        if (!Files.exists(root, LinkOption.NOFOLLOW_LINKS)) return;
-        Files.walkFileTree(root, new SimpleFileVisitor<>() {
-            @Override public FileVisitResult visitFile(Path file, BasicFileAttributes attributes) throws IOException {
-                Files.delete(file);
-                return FileVisitResult.CONTINUE;
-            }
-            @Override public FileVisitResult postVisitDirectory(Path directory, IOException error) throws IOException {
-                if (error != null) throw error;
-                Files.delete(directory);
-                return FileVisitResult.CONTINUE;
-            }
-        });
+        try { return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(data)); }
+        catch (NoSuchAlgorithmException impossible) { throw new IllegalStateException(impossible); }
     }
 
     public record Entry(String name, String path, boolean directory, long size, long modifiedAt) { }

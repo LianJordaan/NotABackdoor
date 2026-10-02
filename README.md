@@ -25,6 +25,8 @@ The upcoming `1.0.0-beta.1` release is a complete replacement of the old HTTP pa
 
 The panel listens only on `127.0.0.1`. It intentionally refuses a public bind address. No separate web service, database, or proxy is needed; remote access uses the server's existing SSH connection. Change `panel.port` in `plugins/NotABackdoor/config.yml` if 8127 is in use.
 
+The file manager and backups require a Java filesystem provider with `SecureDirectoryStream`, which keeps operations bound to open directory handles during symlink swaps. If the provider lacks it, the plugin refuses to start and logs `This filesystem has no race-safe directory handles; panel file access is disabled`. Linux filesystems used for the live tests support it; the default Windows JDK provider does not. This candidate needs fresh live-server verification after the file-layer change.
+
 On Paper 1.21.11, a scripted offline-mode Minecraft client also verified that panel operator, console, whitelist, and ban actions affect a connected player and subsequent joins. The [test record](docs/TESTING.md#real-client-panel-probe) distinguishes this 30/30 end-to-end result from the four-version panel API checks. A Microsoft-authenticated player login has not been tested.
 
 If your host does not provide SSH access, you cannot use the documented remote-access setup on that host yet. A custom HTTPS reverse proxy needs its own access controls and must rewrite the upstream `Host` and `Origin` headers to the allowed localhost address; it is not an automatic setup option. Opening a public HTTP port is not a supported shortcut.
@@ -39,7 +41,7 @@ The first start copies an old `config.yml` to a timestamped `.legacy-*.bak` file
 
 The browser UI uses the same-origin API. Every state-changing request requires a session-specific request token, and requests from a foreign browser origin are denied. Sessions expire after two hours and are invalidated when the password changes. Login attempts are throttled. Panel responses use no-store, a restrictive content security policy, and frame protection.
 
-File paths stay under the server process directory, including `plugins/` and `server.properties` even if worlds live elsewhere. Absolute paths, traversal, and symlink targets are rejected. The text editor checks the file hash before saving so a stale tab cannot silently replace newer work. Text edits are limited to 2 MiB, uploads to 128 MiB, ZIP source data and extracted archives to 1 GiB each. A backup excludes its own backup directory and is capped at 20 GiB.
+File paths stay under the server process directory, including `plugins/` and `server.properties` even if worlds live elsewhere. Absolute paths and traversal are rejected; symlinks are never followed. File reads, writes, ZIP operations and backups use open directory handles so a concurrent path replacement cannot redirect them outside the root. The text editor checks the file hash before saving so a stale tab cannot silently replace newer work. Text edits are limited to 2 MiB, uploads to 128 MiB, ZIP source data and extracted archives to 1 GiB each. A backup excludes its own backup directory and is capped at 20 GiB.
 
 **The panel has full server authority after sign-in.** Treat its password, console access, and SSH tunnel as administrator credentials. A localhost-only design limits accidental internet exposure; it does not make an untrusted person safe to grant panel access.
 
